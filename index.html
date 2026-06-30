@@ -1,0 +1,767 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>웹소설 완벽 줄맞춤 도구</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Malgun Gothic', sans-serif;
+            background-color: #f0f2f5;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 820px;
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+        .header {
+            padding: 22px 28px 16px;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .header h2 {
+            color: #2c3e50;
+            font-size: 20px;
+        }
+        .tab-bar {
+            display: flex;
+            border-bottom: 2px solid #e9ecef;
+            background: #f8f9fa;
+        }
+        .tab-btn {
+            flex: 1;
+            padding: 13px 0;
+            font-size: 15px;
+            font-weight: bold;
+            border: none;
+            background: transparent;
+            color: #868e96;
+            cursor: pointer;
+            transition: color 0.2s, background 0.2s;
+        }
+        .tab-btn.active {
+            color: #3498db;
+            background: #fff;
+            border-bottom: 3px solid #3498db;
+            margin-bottom: -2px;
+        }
+        .tab-btn:hover:not(.active) { background: #e9ecef; }
+        .tab-content { display: none; padding: 22px 26px 26px; }
+        .tab-content.active { display: block; }
+        .file-upload-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .file-label {
+            padding: 9px 18px;
+            background-color: #34495e;
+            color: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            white-space: nowrap;
+            transition: background 0.2s;
+        }
+        .file-label:hover { background-color: #2c3e50; }
+        input[type="file"] { display: none; }
+        .file-name {
+            font-size: 13px;
+            color: #868e96;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .options {
+            margin-bottom: 16px;
+            padding: 14px 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .options-row {
+            display: flex;
+            gap: 18px;
+            flex-wrap: wrap;
+        }
+        .options label {
+            font-size: 13px;
+            color: #495057;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .option-select-group {
+            width: 100%;
+            display: flex;
+            gap: 20px;
+            padding-top: 12px;
+            border-top: 1px dashed #ced4da;
+            flex-wrap: wrap;
+        }
+        .option-select-group label {
+            font-weight: bold;
+            color: #2c3e50;
+            font-size: 13px;
+        }
+        .option-select-group select {
+            padding: 4px 8px;
+            border-radius: 4px;
+            border: 1px solid #ced4da;
+            font-family: 'Malgun Gothic', sans-serif;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        textarea {
+            width: 100%;
+            height: 240px;
+            padding: 12px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            font-family: 'Malgun Gothic', sans-serif;
+            font-size: 14px;
+            line-height: 1.6;
+            resize: vertical;
+            margin-bottom: 14px;
+        }
+        textarea:focus { outline: none; border-color: #3498db; }
+        .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+        button.btn {
+            padding: 11px 20px;
+            font-size: 13px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+        .btn-primary  { background: #3498db; color: #fff; }
+        .btn-primary:hover  { background: #2980b9; }
+        .btn-success  { background: #2ecc71; color: #fff; }
+        .btn-success:hover  { background: #27ae60; }
+        .btn-download { background: #e67e22; color: #fff; }
+        .btn-download:hover { background: #d35400; }
+        .btn-secondary { background: #e9ecef; color: #495057; }
+        .btn-secondary:hover { background: #dee2e6; }
+        .btn-epub { background: #8e44ad; color: #fff; }
+        .btn-epub:hover { background: #7d3c98; }
+        .status-msg {
+            margin-top: 14px;
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 13px;
+            display: none;
+        }
+        .status-msg.info  { background: #d1ecf1; color: #0c5460; display: block; }
+        .status-msg.ok    { background: #d4edda; color: #155724; display: block; }
+        .status-msg.error { background: #f8d7da; color: #721c24; display: block; }
+        #epubLog {
+            margin-top: 14px;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 12px;
+            font-size: 12px;
+            color: #495057;
+            font-family: monospace;
+            max-height: 160px;
+            overflow-y: auto;
+            display: none;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h2>📝 웹소설 텍스트 완벽 복원 도구 (패치 적용판)</h2>
+    </div>
+
+    <!-- 탭 바 -->
+    <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab('txt', this)">📄 TXT</button>
+        <button class="tab-btn"        onclick="switchTab('epub', this)">📚 EPUB</button>
+    </div>
+
+    <!-- TXT 탭 -->
+    <div id="tab-txt" class="tab-content active">
+        <div class="file-upload-wrapper">
+            <label for="txtFileInput" class="file-label">📂 TXT 파일 불러오기</label>
+            <input type="file" id="txtFileInput" accept=".txt" onclick="this.value=''">
+            <span class="file-name" id="txtFileName">선택된 파일 없음</span>
+        </div>
+        <div class="options">
+            <div class="options-row">
+                <label style="color:#e74c3c;font-weight:bold;"><input type="checkbox" id="fixBrokenLines" checked> ⚡ 끊긴 문장 하나로 합치기</label>
+                <label style="color:#8e44ad;font-weight:bold;"><input type="checkbox" id="fixPunctuationSpace" checked> 🧹 기호/과도한 띄어쓰기 압축</label>
+            </div>
+            <div class="options-row">
+                <label style="color:#2980b9;font-weight:bold;"><input type="checkbox" id="spaceAroundDialogue" checked> 💬 대화문 위아래 한 줄 띄기</label>
+                <label><input type="checkbox" id="indentParagraphs" checked> 문단 첫 줄 2칸 들여쓰기</label>
+            </div>
+            <div class="option-select-group">
+                <label>↔️ 문단 간격:
+                    <select id="paragraphSpacing">
+                        <option value="1" selected>빈 줄 1줄 (기본)</option>
+                        <option value="2">빈 줄 2줄</option>
+                        <option value="remove">모든 빈 줄 제거</option>
+                    </select>
+                </label>
+                <label>↕️ 화면 줄 간격:
+                    <select id="lineHeightSelect" onchange="changeLineHeight(this.value)">
+                        <option value="1.4">1.4배 (좁게)</option>
+                        <option value="1.6" selected>1.6배 (보통)</option>
+                        <option value="1.8">1.8배 (여유롭게)</option>
+                        <option value="2.0">2.0배 (넓게)</option>
+                    </select>
+                </label>
+            </div>
+        </div>
+        <textarea id="inputText"  placeholder="여기에 원본 텍스트를 붙여넣으세요..."></textarea>
+        <div class="btn-group" style="margin-bottom:14px;">
+            <button class="btn btn-primary"   onclick="alignText()">✨ 자동 정리 실행</button>
+            <button class="btn btn-success"   onclick="copyResult()">📋 결과 복사</button>
+            <button class="btn btn-download"  onclick="downloadTxt()">📥 TXT 다운로드</button>
+            <button class="btn btn-secondary" onclick="clearTxt()">초기화</button>
+        </div>
+        <textarea id="outputText" placeholder="정리된 결과가 여기에 표시됩니다..." readonly></textarea>
+    </div>
+
+    <!-- EPUB 탭 -->
+    <div id="tab-epub" class="tab-content">
+        <div class="file-upload-wrapper">
+            <label for="epubFileInput" class="file-label">📂 EPUB 파일 불러오기</label>
+            <input type="file" id="epubFileInput" accept=".epub" onclick="this.value=''">
+            <span class="file-name" id="epubFileName">선택된 파일 없음</span>
+        </div>
+        <div class="options">
+            <div class="options-row">
+                <label style="color:#e74c3c;font-weight:bold;"><input type="checkbox" id="epub_fixBrokenLines" checked> ⚡ 끊긴 문장 하나로 합치기</label>
+                <label style="color:#8e44ad;font-weight:bold;"><input type="checkbox" id="epub_fixPunctuationSpace" checked> 🧹 기호/과도한 띄어쓰기 압축</label>
+            </div>
+            <div class="options-row">
+                <label style="color:#2980b9;font-weight:bold;"><input type="checkbox" id="epub_spaceAroundDialogue" checked> 💬 대화문 위아래 빈 &lt;p&gt; 추가</label>
+                <label><input type="checkbox" id="epub_indentParagraphs" checked> 문단 첫 줄 2em 들여쓰기</label>
+            </div>
+            <div class="option-select-group">
+                <label>↔️ 문단 간격:
+                    <select id="epub_paragraphSpacing">
+                        <option value="1" selected>빈 &lt;p&gt; 1개 유지 (기본)</option>
+                        <option value="2">빈 &lt;p&gt; 2개로 넓게</option>
+                        <option value="remove">빈 &lt;p&gt; 모두 제거</option>
+                    </select>
+                </label>
+            </div>
+        </div>
+        <div class="btn-group">
+            <button class="btn btn-epub"      onclick="processEpub()">✨ EPUB 정리 &amp; 다운로드</button>
+            <button class="btn btn-primary"   onclick="previewEpub()">👁️ 미리보기</button>
+            <button class="btn btn-secondary" onclick="clearEpub()">초기화</button>
+        </div>
+        <div class="status-msg" id="epubStatus"></div>
+        <div id="epubLog"></div>
+        <div id="epubPreviewArea" style="display:none; margin-top:16px;">
+            <div style="display:flex; gap:10px; margin-bottom:8px; align-items:center;">
+                <strong style="font-size:13px; color:#495057;">📖 미리보기 (첫 번째 챕터)</strong>
+                <select id="previewChapterSel" style="font-size:12px; padding:3px 7px; border:1px solid #ced4da; border-radius:4px; font-family:'Malgun Gothic',sans-serif;" onchange="updatePreview()"></select>
+            </div>
+            <div style="display:flex; gap:10px;">
+                <div style="flex:1;">
+                    <div style="font-size:12px; color:#868e96; margin-bottom:4px; text-align:center;">원본</div>
+                    <div id="epubPreviewBefore" style="height:320px; overflow-y:auto; border:1px solid #dee2e6; border-radius:6px; padding:12px; font-size:14px; line-height:1.7; background:#fafafa; white-space:pre-wrap; font-family:'Malgun Gothic',sans-serif;"></div>
+                </div>
+                <div style="flex:1;">
+                    <div style="font-size:12px; color:#868e96; margin-bottom:4px; text-align:center;">정리 후</div>
+                    <div id="epubPreviewAfter" style="height:320px; overflow-y:auto; border:1px solid #3498db; border-radius:6px; padding:12px; font-size:14px; line-height:1.7; background:#f0f8ff; white-space:pre-wrap; font-family:'Malgun Gothic',sans-serif;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+async function iosCompatDownload(blob, filename) {
+    if (navigator.share && navigator.canShare) {
+        try {
+            const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
+            if (navigator.canShare({ files: [file] })) {
+                await navigator.share({ files: [file], title: filename });
+                return;
+            }
+        } catch (e) {
+            if (e.name === 'AbortError') return;
+        }
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+        const a = document.createElement('a');
+        a.href = reader.result;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    };
+    reader.readAsDataURL(blob);
+}
+
+function switchTab(name, btn) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+    btn.classList.add('active');
+}
+
+document.getElementById('txtFileInput').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    document.getElementById('txtFileName').textContent = file.name;
+    const reader = new FileReader();
+    reader.onload = e => { document.getElementById('inputText').value = e.target.result; };
+    reader.readAsText(file, 'UTF-8');
+});
+
+function changeLineHeight(v) {
+    document.getElementById('inputText').style.lineHeight = v;
+    document.getElementById('outputText').style.lineHeight = v;
+}
+
+/* ★수정된 텍스트 정리 로직 (스마트 따옴표 추가)★ */
+function processText(input, opts) {
+    const { fixBrokenLines, fixPunctuationSpace, spaceAroundDialogue, indentParagraphs, paragraphSpacing } = opts;
+
+    if (fixPunctuationSpace) {
+        input = input.replace(/[^\S\r\n]{2,}/g, ' ');
+        input = input.replace(/[^\S\r\n]+([.,?!;:])/g, '$1');
+        input = input.replace(/(["'“‘「『])[^\S\r\n]+/g, '$1');
+        input = input.replace(/[^\S\r\n]+(["'”’」』])/g, '$1');
+    }
+
+    let lines = input.split('\n');
+    let processedLines = [];
+    let currentBlock = "";
+
+    if (fixBrokenLines) {
+        for (let i = 0; i < lines.length; i++) {
+            let line = lines[i].trim();
+            if (line === "") {
+                if (currentBlock !== "") { processedLines.push(currentBlock); currentBlock = ""; }
+                processedLines.push("");
+            } else {
+                if (currentBlock === "") {
+                    currentBlock = line;
+                } else {
+                    let lastChar = currentBlock.slice(-1);
+                    // ★이곳이 핵심 수정 부분: 둥근 따옴표와 꺾쇠 인식 추가★
+                    if (/[.!?\"'”“’」』]/.test(lastChar)) {
+                        processedLines.push(currentBlock);
+                        currentBlock = line;
+                    } else {
+                        currentBlock += " " + line;
+                    }
+                }
+            }
+        }
+        if (currentBlock !== "") processedLines.push(currentBlock);
+    } else {
+        processedLines = lines.map(l => l.trim());
+    }
+
+    let finalLines = [];
+    for (let i = 0; i < processedLines.length; i++) {
+        let line = processedLines[i].trim();
+        if (line === '') {
+            if (paragraphSpacing === 'remove') continue;
+            if (finalLines.length > 0 && finalLines[finalLines.length - 1] === '') continue;
+            if (paragraphSpacing === '1') finalLines.push('');
+            else if (paragraphSpacing === '2') { finalLines.push(''); finalLines.push(''); }
+        } else {
+            // ★대화문 인식에도 둥근 따옴표와 꺾쇠 추가★
+            const isDialogue = /^["'“‘「『]/.test(line);
+            if (spaceAroundDialogue && isDialogue && paragraphSpacing !== 'remove') {
+                if (finalLines.length > 0 && finalLines[finalLines.length - 1] !== '') finalLines.push('');
+            }
+            if (indentParagraphs && !isDialogue) line = '  ' + line;
+            finalLines.push(line);
+            if (spaceAroundDialogue && isDialogue && paragraphSpacing !== 'remove') finalLines.push('');
+        }
+    }
+    return finalLines.join('\n').trim();
+}
+
+function alignText() {
+    const opts = {
+        fixBrokenLines:      document.getElementById('fixBrokenLines').checked,
+        fixPunctuationSpace: document.getElementById('fixPunctuationSpace').checked,
+        spaceAroundDialogue: document.getElementById('spaceAroundDialogue').checked,
+        indentParagraphs:    document.getElementById('indentParagraphs').checked,
+        paragraphSpacing:    document.getElementById('paragraphSpacing').value,
+    };
+    const result = processText(document.getElementById('inputText').value, opts);
+    document.getElementById('outputText').value = result;
+}
+
+function copyResult() {
+    const out = document.getElementById('outputText');
+    if (!out.value) { alert('정리를 먼저 실행해주세요.'); return; }
+    out.select();
+    document.execCommand('copy');
+    alert('복사되었습니다!');
+}
+
+async function downloadTxt() {
+    const text = document.getElementById('outputText').value;
+    if (!text) { alert('정리를 먼저 실행해주세요.'); return; }
+    let fn = document.getElementById('txtFileName').textContent;
+    const filename = fn !== '선택된 파일 없음' ? fn.replace('.txt', '_정리완료.txt') : '정리완료.txt';
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8;' });
+    await iosCompatDownload(blob, filename);
+}
+
+function clearTxt() {
+    ['inputText','outputText'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('txtFileInput').value = '';
+    document.getElementById('txtFileName').textContent = '선택된 파일 없음';
+}
+
+let epubFile = null;
+
+document.getElementById('epubFileInput').addEventListener('change', function(e) {
+    epubFile = e.target.files[0] || null;
+    document.getElementById('epubFileName').textContent = epubFile ? epubFile.name : '선택된 파일 없음';
+    setEpubStatus('', '');
+    document.getElementById('epubLog').style.display = 'none';
+    document.getElementById('epubLog').textContent = '';
+});
+
+function setEpubStatus(type, msg) {
+    const el = document.getElementById('epubStatus');
+    el.className = 'status-msg' + (type ? ' ' + type : '');
+    el.textContent = msg;
+}
+
+function epubLog(msg) {
+    const el = document.getElementById('epubLog');
+    el.style.display = 'block';
+    el.textContent += msg + '\n';
+    el.scrollTop = el.scrollHeight;
+}
+
+async function processEpub() {
+    if (!epubFile) { setEpubStatus('error', '⚠️ EPUB 파일을 먼저 선택해주세요.'); return; }
+    if (typeof JSZip === 'undefined') { setEpubStatus('error', '⚠️ JSZip 라이브러리를 불러오는 중입니다. 잠시 후 다시 시도하세요.'); return; }
+
+    const opts = {
+        fixBrokenLines:      document.getElementById('epub_fixBrokenLines').checked,
+        fixPunctuationSpace: document.getElementById('epub_fixPunctuationSpace').checked,
+        spaceAroundDialogue: document.getElementById('epub_spaceAroundDialogue').checked,
+        indentParagraphs:    document.getElementById('epub_indentParagraphs').checked,
+        paragraphSpacing:    document.getElementById('epub_paragraphSpacing').value,
+    };
+
+    setEpubStatus('info', '⏳ EPUB 처리 중...');
+    document.getElementById('epubLog').textContent = '';
+    document.getElementById('epubLog').style.display = 'block';
+
+    try {
+        const arrayBuffer = await epubFile.arrayBuffer();
+        const zip = await JSZip.loadAsync(arrayBuffer);
+        const mimetypeFile = zip.file('mimetype');
+        if (!mimetypeFile) throw new Error('mimetype 파일을 찾을 수 없습니다.');
+        const mimetype = (await mimetypeFile.async('string')).trim();
+        if (!mimetype.includes('epub')) throw new Error('EPUB 파일이 아닙니다: ' + mimetype);
+        epubLog('✅ mimetype 확인: ' + mimetype);
+
+        const containerXml = await zip.file('META-INF/container.xml').async('string');
+        const opfMatch = containerXml.match(/full-path="([^"]+\.opf)"/i);
+        if (!opfMatch) throw new Error('OPF 경로를 찾을 수 없습니다.');
+        const opfPath = opfMatch[1];
+        const opfDir  = opfPath.includes('/') ? opfPath.substring(0, opfPath.lastIndexOf('/') + 1) : '';
+
+        const opfText = await zip.file(opfPath).async('string');
+        const parser  = new DOMParser();
+        const opfDoc  = parser.parseFromString(opfText, 'application/xml');
+
+        const manifest = {};
+        opfDoc.querySelectorAll('manifest item').forEach(item => {
+            manifest[item.getAttribute('id')] = item.getAttribute('href');
+        });
+
+        const spineItems = [];
+        opfDoc.querySelectorAll('spine itemref').forEach(ref => {
+            const idref = ref.getAttribute('idref');
+            if (manifest[idref]) spineItems.push({ idref, href: manifest[idref] });
+        });
+
+        let processedCount = 0;
+        for (const item of spineItems) {
+            const filePath = opfDir + item.href;
+            const fileObj  = zip.file(filePath);
+            if (!fileObj) { epubLog('⚠️ 파일 없음: ' + filePath); continue; }
+            const originalHtml = await fileObj.async('string');
+            const modifiedHtml = processEpubHtml(originalHtml, opts);
+            zip.file(filePath, modifiedHtml);
+            processedCount++;
+            epubLog('  처리: ' + item.href);
+        }
+        epubLog('✅ 총 ' + processedCount + '개 파일 처리 완료');
+
+        const outBlob = await zip.generateAsync({
+            type: 'blob',
+            mimeType: 'application/epub+zip',
+            compression: 'DEFLATE',
+            compressionOptions: { level: 6 },
+        });
+
+        const finalZip = new JSZip();
+        const reloaded = await JSZip.loadAsync(await outBlob.arrayBuffer());
+        reloaded.forEach((relativePath, file) => {
+            if (relativePath === 'mimetype') {
+                finalZip.file('mimetype', 'application/epub+zip', { compression: 'STORE' });
+            } else {
+                finalZip.file(relativePath, file.async('uint8array'), {
+                    compression: 'DEFLATE',
+                    compressionOptions: { level: 6 }
+                });
+            }
+        });
+
+        const finalBlob = await finalZip.generateAsync({
+            type: 'blob',
+            mimeType: 'application/epub+zip',
+        });
+
+        const origName = epubFile.name.replace(/\.epub$/i, '');
+        const dlFilename = origName + '_정리완료.epub';
+        await iosCompatDownload(finalBlob, dlFilename);
+        setEpubStatus('ok', '✅ 완료! 파일이 다운로드되었습니다.');
+
+    } catch (err) {
+        setEpubStatus('error', '❌ 오류: ' + err.message);
+        epubLog('ERROR: ' + err.message);
+    }
+}
+
+/* ★수정된 EPUB HTML 로직 (스마트 따옴표 추가)★ */
+function processEpubHtml(html, opts) {
+    const { fixBrokenLines, fixPunctuationSpace, spaceAroundDialogue, indentParagraphs, paragraphSpacing } = opts;
+    const parser = new DOMParser();
+    const doc    = parser.parseFromString(html, 'application/xhtml+xml');
+    const body   = doc.querySelector('body');
+    if (!body) return html;
+    const NS = 'http://www.w3.org/1999/xhtml';
+
+    const allP = Array.from(body.querySelectorAll('p'));
+    allP.forEach(p => {
+        const rawText = p.textContent || '';
+        const blocks = rawText.split(/\n{2,}/);
+        if (blocks.length <= 1) return; 
+        const parent = p.parentNode;
+        const frag   = doc.createDocumentFragment();
+        blocks.forEach(blk => {
+            const np = doc.createElementNS(NS, 'p');
+            np.textContent = blk.trim(); 
+            if (p.getAttribute('style')) np.setAttribute('style', p.getAttribute('style'));
+            if (p.getAttribute('class')) np.setAttribute('class', p.getAttribute('class'));
+            frag.appendChild(np);
+        });
+        parent.insertBefore(frag, p);
+        parent.removeChild(p);
+    });
+
+    const allP2 = Array.from(body.querySelectorAll('p'));
+    allP2.forEach(p => {
+        let text = p.textContent || '';
+        if (text.trim() === '') return;
+
+        if (fixPunctuationSpace) {
+            text = text.replace(/[^\S\r\n]{2,}/g, ' ');
+            text = text.replace(/[^\S\r\n]+([.,?!;:])/g, '$1');
+            text = text.replace(/(["'“‘「『])[^\S\r\n]+/g, '$1');
+            text = text.replace(/[^\S\r\n]+(["'”’」』])/g, '$1');
+        }
+
+        if (fixBrokenLines) {
+            const subLines = text.split('\n');
+            let merged = '';
+            for (let i = 0; i < subLines.length; i++) {
+                const sl = subLines[i].trim();
+                if (!sl) continue;
+                if (!merged) { merged = sl; continue; }
+                const last = merged.slice(-1);
+                // EPUB용 끊긴 문장 합치기 로직 개선
+                if (/[.!?\"'”“’」』…\-]/.test(last)) {
+                    merged += '\n' + sl; 
+                } else {
+                    merged += ' ' + sl;  
+                }
+            }
+            text = merged;
+        }
+
+        text = text.trim();
+        const isDialogue = /^["'“‘「『\[]/.test(text);
+
+        if (indentParagraphs && !isDialogue) {
+            p.style.textIndent = '2em';
+        } else {
+            p.style.textIndent = '0';
+        }
+        p.textContent = text;
+    });
+
+    const pList = Array.from(body.querySelectorAll('p'));
+    let i = 0;
+    while (i < pList.length) {
+        const p       = pList[i];
+        const isEmpty = p.textContent.trim() === '';
+
+        if (isEmpty) {
+            if (paragraphSpacing === 'remove') {
+                p.parentNode.removeChild(p);
+                i++; continue;
+            }
+            let j = i + 1;
+            while (j < pList.length && pList[j].textContent.trim() === '') j++;
+            const needed = paragraphSpacing === '2' ? 2 : 1;
+            const actual = j - i;
+            if (actual < needed) {
+                for (let k = 0; k < needed - actual; k++) {
+                    const np = doc.createElementNS(NS, 'p'); np.textContent = '';
+                    p.parentNode.insertBefore(np, pList[j] || null);
+                }
+            } else if (actual > needed) {
+                for (let k = i + needed; k < j; k++) {
+                    if (pList[k].parentNode) pList[k].parentNode.removeChild(pList[k]);
+                }
+            }
+            i = j; continue;
+        }
+
+        if (spaceAroundDialogue && paragraphSpacing !== 'remove') {
+            const isDialogue = /^["'“‘「『\[]/.test(p.textContent.trim());
+            if (isDialogue) {
+                const prev = p.previousElementSibling;
+                if (prev && prev.textContent.trim() !== '') {
+                    const np = doc.createElementNS(NS, 'p'); np.textContent = '';
+                    p.parentNode.insertBefore(np, p);
+                }
+                const next = p.nextElementSibling;
+                if (next && next.textContent.trim() !== '') {
+                    const np = doc.createElementNS(NS, 'p'); np.textContent = '';
+                    p.parentNode.insertBefore(np, next);
+                }
+            }
+        }
+        i++;
+    }
+
+    const serializer = new XMLSerializer();
+    return serializer.serializeToString(doc);
+}
+
+let _previewSpineItems = [];
+let _previewZip        = null;
+let _previewOpfDir     = '';
+
+async function previewEpub() {
+    if (!epubFile) { setEpubStatus('error', '⚠️ EPUB 파일을 먼저 선택해주세요.'); return; }
+    setEpubStatus('info', '⏳ 미리보기 준비 중...');
+    try {
+        const arrayBuffer = await epubFile.arrayBuffer();
+        const zip = await JSZip.loadAsync(arrayBuffer);
+        const containerXml = await zip.file('META-INF/container.xml').async('string');
+        const opfMatch = containerXml.match(/full-path="([^"]+\.opf)"/i);
+        const opfPath = opfMatch[1];
+        const opfDir  = opfPath.includes('/') ? opfPath.substring(0, opfPath.lastIndexOf('/') + 1) : '';
+        const opfText = await zip.file(opfPath).async('string');
+        const parser  = new DOMParser();
+        const opfDoc  = parser.parseFromString(opfText, 'application/xml');
+        const manifest = {};
+        opfDoc.querySelectorAll('manifest item').forEach(item => {
+            manifest[item.getAttribute('id')] = item.getAttribute('href');
+        });
+        const spineItems = [];
+        opfDoc.querySelectorAll('spine itemref').forEach(ref => {
+            const idref = ref.getAttribute('idref');
+            if (manifest[idref]) spineItems.push({ idref, href: manifest[idref] });
+        });
+        _previewZip        = zip;
+        _previewSpineItems = spineItems;
+        _previewOpfDir     = opfDir;
+        const sel = document.getElementById('previewChapterSel');
+        sel.innerHTML = '';
+        spineItems.forEach((item, idx) => {
+            const opt = document.createElement('option');
+            opt.value = idx;
+            opt.textContent = item.href.replace(/.*\//, ''); 
+            sel.appendChild(opt);
+        });
+        document.getElementById('epubPreviewArea').style.display = 'block';
+        setEpubStatus('ok', '✅ 미리보기 준비 완료. 챕터를 선택하세요.');
+        await updatePreview();
+    } catch(err) {
+        setEpubStatus('error', '❌ 오류: ' + err.message);
+    }
+}
+
+async function updatePreview() {
+    if (!_previewZip || _previewSpineItems.length === 0) return;
+    const idx  = parseInt(document.getElementById('previewChapterSel').value);
+    const item = _previewSpineItems[idx];
+    const filePath = _previewOpfDir + item.href;
+    const fileObj  = _previewZip.file(filePath);
+    if (!fileObj) return;
+    const originalHtml = await fileObj.async('string');
+    const parserBefore = new DOMParser();
+    const docBefore    = parserBefore.parseFromString(originalHtml, 'application/xhtml+xml');
+    const bodyBefore   = docBefore.querySelector('body');
+    const beforeText   = bodyBefore ? bodyBefore.textContent.replace(/\t/g,'').replace(/[ ]{3,}/g,' ') : '';
+    const opts = {
+        fixBrokenLines:      document.getElementById('epub_fixBrokenLines').checked,
+        fixPunctuationSpace: document.getElementById('epub_fixPunctuationSpace').checked,
+        spaceAroundDialogue: document.getElementById('epub_spaceAroundDialogue').checked,
+        indentParagraphs:    document.getElementById('epub_indentParagraphs').checked,
+        paragraphSpacing:    document.getElementById('epub_paragraphSpacing').value,
+    };
+    const modifiedHtml = processEpubHtml(originalHtml, opts);
+    const parserAfter  = new DOMParser();
+    const docAfter     = parserAfter.parseFromString(modifiedHtml, 'application/xhtml+xml');
+    const bodyAfter    = docAfter.querySelector('body');
+    let afterText = '';
+    if (bodyAfter) {
+        Array.from(bodyAfter.querySelectorAll('p')).forEach(p => {
+            const t = p.textContent.trim();
+            afterText += (t ? (p.style.textIndent ? '  ' : '') + t : '') + '\n';
+        });
+    }
+    document.getElementById('epubPreviewBefore').textContent = beforeText.trim();
+    document.getElementById('epubPreviewAfter').textContent  = afterText.trim();
+}
+
+function clearEpub() {
+    epubFile = null;
+    document.getElementById('epubFileInput').value = '';
+    document.getElementById('epubFileName').textContent = '선택된 파일 없음';
+    setEpubStatus('', '');
+    document.getElementById('epubLog').style.display = 'none';
+    document.getElementById('epubLog').textContent = '';
+}
+</script>
+
+</body>
+</html>
