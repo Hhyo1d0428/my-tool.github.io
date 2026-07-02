@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>대용량 텍스트 복구기</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; padding: 20px; line-height: 1.6; }
+        .box { max-width: 400px; margin: 0 auto; text-align: center; background: #f9f9f9; padding: 20px; border-radius: 10px; }
+        button { background-color: #007aff; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 8px; margin-top: 15px; cursor: pointer; width: 100%; }
+        button:active { background-color: #005bb5; }
+        #status { margin-top: 15px; font-weight: bold; color: #333; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h2>텍스트 복구기</h2>
+        <p>19MB 대용량 텍스트도 서버 업로드 없이 아이폰 내부에서 즉시 복구합니다.</p>
+        
+        <input type="file" id="fileInput" accept=".txt" style="width: 100%; margin-top: 10px;">
+        <button onclick="convertFile()">UTF-8로 복구 후 다운로드</button>
+        
+        <p id="status"></p>
+    </div>
+
+    <script>
+        function convertFile() {
+            const fileInput = document.getElementById('fileInput');
+            const status = document.getElementById('status');
+
+            if (fileInput.files.length === 0) {
+                status.style.color = "red";
+                status.innerText = "파일을 먼저 선택해주세요!";
+                return;
+            }
+
+            const file = fileInput.files[0];
+            status.style.color = "blue";
+            status.innerText = "변환 중... (약 2~3초 소요)";
+
+            const reader = new FileReader();
+
+            // 파일을 다 읽었을 때 실행할 작업
+            reader.onload = function(e) {
+                try {
+                    // 바이트(Byte) 단위로 읽어온 데이터를 UTF-8로 강제 해석
+                    const arrayBuffer = e.target.result;
+                    const decoder = new TextDecoder('utf-8');
+                    const text = decoder.decode(arrayBuffer);
+
+                    // 아이폰 '파일' 앱 및 뷰어에서 100% 인식하도록 BOM(Byte Order Mark) 기호 추가
+                    const blob = new Blob(["\uFEFF" + text], { type: 'text/plain;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+
+                    // 가상의 다운로드 링크를 만들어 강제 클릭 유발 (아이폰 다운로드 기능 실행)
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = '복구완료_' + file.name;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+
+                    status.style.color = "green";
+                    status.innerText = "✅ 복구 완료! 사파리 다운로드 항목이나 '파일' 앱을 확인하세요.";
+                } catch (error) {
+                    status.style.color = "red";
+                    status.innerText = "❌ 오류 발생: " + error.message;
+                }
+            };
+
+            reader.onerror = function() {
+                status.style.color = "red";
+                status.innerText = "❌ 파일을 읽는 중 오류가 발생했습니다.";
+            };
+
+            // 대용량 파일을 튕김 없이 읽기 위해 ArrayBuffer 방식 사용
+            reader.readAsArrayBuffer(file);
+        }
+    </script>
+</body>
+</html>
