@@ -10,7 +10,7 @@
         body { font-family: -apple-system, sans-serif; padding: 15px; background: #f9f9f9; line-height: 1.5; }
         .box { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
         select, textarea, button, input { width: 100%; margin-top: 10px; box-sizing: border-box; font-size: 15px; }
-        select { padding: 10px; border-radius: 8px; border: 1px solid #ccc; }
+        select { padding: 10px; border-radius: 8px; border: 1px solid #ccc; font-weight: bold; }
         textarea { height: 350px; font-family: monospace; padding: 12px; border-radius: 8px; border: 1px solid #ccc; background: #f4f4f4; resize: none; }
         button { background-color: #007aff; color: white; border: none; padding: 14px; font-size: 16px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-top: 15px; }
         button:active { background-color: #005bb5; }
@@ -25,29 +25,29 @@
 <body>
     <div class="box">
         <h2>EPUB 챕터 편집기 📖</h2>
-        <p>1. 수정할 EPUB 파일을 선택하세요. (9.5MB 대용량 지원)</p>
+        <p>1. 수정할 EPUB 파일을 선택하세요.</p>
         <input type="file" id="epubInput" accept=".epub">
         <p id="loadStatus" class="status"></p>
         
         <div id="editorArea" style="display:none; margin-top:10px;">
-            <p>2. 수정하고 싶은 챕터(파일)를 선택하세요.<br><small style="color:gray;">* 보통 OEBPS/Text/ 내부에 있는 .xhtml 또는 .html 파일이 소설의 본문입니다.</small></p>
+            <p>2. 수정하고 싶은 챕터(목차)를 선택하세요.</p>
             <select id="fileSelect">
-                <option value="">-- 파일 선택 --</option>
+                <option value="">-- 챕터 선택 --</option>
             </select>
             
             <div class="warning-box">
-                ⚠️ <strong>주의:</strong> 글자 사이에 있는 <code>&lt;p&gt;</code>, <code>&lt;br/&gt;</code> 같은 영어 괄호(HTML 태그)는 글꼴이나 줄바꿈을 유지하는 뼈대이므로 <strong>절대 지우지 말고 텍스트만 수정하세요!</strong>
+                ⚠️ <strong>주의:</strong> 글자 사이의 <code>&lt;p&gt;</code>, <code>&lt;br/&gt;</code> 같은 영어 괄호는 글꼴/줄바꿈 뼈대이므로 <strong>절대 지우지 말고 한글 내용만 수정하세요!</strong>
             </div>
 
             <p>3. 내용을 수정하세요.</p>
             <textarea id="fileContent" placeholder="여기에 챕터 내용이 표시됩니다."></textarea>
             
-            <button onclick="saveChanges()" class="btn-green">수정 사항 적용하기 (임시 저장)</button>
+            <button onclick="saveChanges()" class="btn-green">현재 챕터 수정 적용 (임시 저장)</button>
             <p id="saveStatus" class="status"></p>
 
             <hr style="margin: 25px 0; border: 0; border-top: 1px solid #eee;">
             
-            <p>4. 모든 수정을 마쳤다면, 하나의 EPUB으로 다시 포장합니다.</p>
+            <p>4. 모든 수정을 마쳤다면, 최종 파일로 뽑아냅니다.</p>
             <button onclick="downloadEPUB()">최종 EPUB 다운로드</button>
             <p id="downloadStatus" class="status"></p>
         </div>
@@ -64,44 +64,79 @@
         const select = document.getElementById('fileSelect');
         const textarea = document.getElementById('fileContent');
 
-        // 1. EPUB 파일 불러오기 및 압축 해제
         epubInput.addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
             
-            loadStatus.innerText = "⏳ EPUB 구조를 분석하는 중...";
+            loadStatus.innerText = "⏳ EPUB 목차를 분석하는 중...";
             loadStatus.className = "status";
             saveStatus.innerText = ""; downloadStatus.innerText = "";
             document.getElementById('editorArea').style.display = 'none';
             
             const reader = new FileReader();
-            reader.onload = function(evt) {
-                zip.loadAsync(evt.target.result).then(function(loadedZip) {
-                    zip = loadedZip;
-                    select.innerHTML = '<option value="">-- 파일 선택 --</option>';
+            reader.onload = async function(evt) {
+                try {
+                    zip = await JSZip.loadAsync(evt.target.result);
                     
-                    // HTML, XHTML, XML 파일만 목록에 표시
-                    Object.keys(zip.files).forEach(function(filename) {
-                        if (!zip.files[filename].dir && filename.match(/\.(html|xhtml|xml)$/i)) {
-                            const option = document.createElement('option');
-                            option.value = filename;
-                            option.text = filename;
-                            select.appendChild(option);
+                    // 1단계: 목차 데이터(TOC)를 추출하여 '파일이름'과 '실제 챕터명(1화 등)' 매칭하기
+                    let tocMap = {};
+                    const ncxKey = Object.keys(zip.files).find(k => k.endsWith('.ncx'));
+                    
+                    if (ncxKey) {
+                        const ncxContent = await zip.file(ncxKey).async("string");
+                        const parser = new DOMParser();
+                        const xmlDoc = parser.parseFromString(ncxContent, "text/xml");
+                        const navPoints = xmlDoc.getElementsByTagName("navPoint");
+                        
+                        for (let i = 0; i < navPoints.length; i++) {
+                            const textEl = navPoints[i].getElementsByTagName("text")[0];
+                            const contentEl = navPoints[i].getElementsByTagName("content")[0];
+                            if (textEl && contentEl) {
+                                const title = textEl.textContent.trim(); // "1화", "프롤로그" 등
+                                const src = contentEl.getAttribute("src").split('#')[0]; 
+                                const fileName = src.split('/').pop(); // "Section0001.xhtml"
+                                tocMap[fileName] = title;
+                            }
                         }
+                    }
+
+                    // 2단계: 화면 드롭다운(선택창)에 깔끔하게 띄우기
+                    select.innerHTML = '<option value="">-- 수정할 챕터(목차) 선택 --</option>';
+                    const fileKeys = Object.keys(zip.files).sort(); // 파일 번호 순서대로 정렬
+
+                    fileKeys.forEach(function(filename) {
+                        // .xml 같은 시스템 파일이나 폴더는 무시하고 HTML 본문 파일만 추출
+                        if (zip.files[filename].dir || !filename.match(/\.(html|xhtml)$/i)) return;
+                        
+                        const justName = filename.split('/').pop(); 
+                        const lowerName = justName.toLowerCase();
+                        
+                        // 표지(cover), 타이틀(title) 등의 껍데기 파일은 목록에서 숨김
+                        if (lowerName.includes('cover') || lowerName.includes('title') || lowerName.includes('nav')) return;
+                        
+                        // 목차에서 찾아낸 "1화" 등의 이름 사용. (만약 못 찾으면 깔끔하게 'Section 0001' 식으로 표시)
+                        let displayName = tocMap[justName];
+                        if (!displayName) {
+                            displayName = justName.replace(/\.[^/.]+$/, ""); 
+                        }
+                        
+                        const option = document.createElement('option');
+                        option.value = filename; // 컴퓨터가 찾을 수 있게 원본 경로는 숨겨둠
+                        option.text = displayName; // 사람 눈에 보이는 건 "1화" 등 목차 이름
+                        select.appendChild(option);
                     });
                     
                     document.getElementById('editorArea').style.display = 'block';
-                    loadStatus.innerText = "✅ 분석 완료! 수정할 챕터를 선택하세요.";
+                    loadStatus.innerText = "✅ 목차 분석 완료! 원하시는 챕터를 선택하세요.";
                     loadStatus.className = "status success";
-                }).catch(function(err) {
+                } catch (err) {
                     loadStatus.innerText = "❌ 오류 발생: " + err.message;
                     loadStatus.className = "status error";
-                });
+                }
             };
             reader.readAsArrayBuffer(file);
         });
 
-        // 2. 선택한 챕터의 텍스트 보여주기
         select.addEventListener('change', function(e) {
             currentFile = e.target.value;
             saveStatus.innerText = "";
@@ -109,30 +144,26 @@
                 textarea.value = "";
                 return;
             }
-            
             zip.file(currentFile).async("string").then(function(content) {
                 textarea.value = content;
             });
         });
 
-        // 3. 수정한 내용을 압축 파일 내부에 임시 저장
         function saveChanges() {
             if (!currentFile) {
-                alert("먼저 수정할 파일을 선택해주세요.");
+                alert("먼저 수정할 챕터를 선택해주세요.");
                 return;
             }
             const newContent = textarea.value;
-            zip.file(currentFile, newContent); // 수정된 내용 덮어쓰기
-            saveStatus.innerText = "✅ 성공적으로 적용되었습니다! (다른 챕터도 계속 수정 가능)";
+            zip.file(currentFile, newContent); 
+            saveStatus.innerText = "✅ 챕터 수정 완료! (이어서 다른 챕터를 계속 수정하셔도 됩니다)";
             saveStatus.className = "status success";
         }
 
-        // 4. EPUB 규격에 맞춰 다시 압축 및 다운로드
         function downloadEPUB() {
-            downloadStatus.innerText = "⏳ 재포장 중... (아이폰 다운로드 창이 뜰 때까지 기다려주세요)";
+            downloadStatus.innerText = "⏳ 최종 파일 재포장 중... (잠시만 기다려주세요)";
             downloadStatus.className = "status";
             
-            // 뷰어(애플 도서 등)가 파일을 거부하지 않도록 mimetype을 최상단 무압축 상태로 강제 지정
             zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
             
             zip.generateAsync({
@@ -149,7 +180,7 @@
                 a.click();
                 document.body.removeChild(a);
                 
-                downloadStatus.innerText = "✅ 다운로드 성공! 아이폰 '파일' 앱을 확인하세요.";
+                downloadStatus.innerText = "✅ 다운로드 성공! 아이폰 '파일' 앱 다운로드 폴더를 확인하세요.";
                 downloadStatus.className = "status success";
             }).catch(function(err) {
                 downloadStatus.innerText = "❌ 다운로드 오류: " + err.message;
