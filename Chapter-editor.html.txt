@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EPUB 목차/제목 원터치 변경기</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body { font-family: -apple-system, sans-serif; padding: 15px; background: #f0f2f5; line-height: 1.5; }
+        .box { max-width: 600px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        h2 { margin-top: 0; color: #1a1a1a; }
+        select, input[type="text"], button, input[type="file"] { width: 100%; margin-top: 10px; box-sizing: border-box; font-size: 16px; }
+        select, input[type="text"] { padding: 12px; border-radius: 8px; border: 1px solid #ccc; font-weight: bold; }
+        button { background-color: #007aff; color: white; border: none; padding: 15px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-top: 15px; }
+        button:active { background-color: #005bb5; }
+        .btn-green { background-color: #34c759; }
+        .btn-green:active { background-color: #248a3d; }
+        .status { font-weight: bold; margin-top: 10px; text-align: center; font-size: 14px; }
+        .success { color: #28a745; }
+        .error { color: #dc3545; }
+        .info-box { background-color: #e7f3fe; color: #0c5460; padding: 12px; border-radius: 8px; font-size: 14px; margin-top: 15px; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h2>EPUB 원터치 제목 변경기 ✨</h2>
+        
+        <p><b>1. EPUB 파일 선택</b> (9.5MB 대용량 지원)</p>
+        <input type="file" id="epubInput" accept=".epub">
+        <p id="loadStatus" class="status"></p>
+        
+        <div id="editorArea" style="display:none; margin-top:20px;">
+            <div class="info-box">
+                💡 <b>변경 원리:</b> 새 이름을 입력하면 본문 제목과 도서 앱의 '목차(TOC) 메뉴' 이름까지 <strong>전부 자동으로 동기화</strong>하여 수정합니다. 코드를 직접 만질 필요가 없습니다!
+            </div>
+
+            <p><b>2. 이름(목차)을 바꿀 챕터 선택</b></p>
+            <select id="chapterSelect">
+                <option value="">-- 목차 로딩 중 --</option>
+            </select>
+            
+            <p><b>3. 새로운 챕터 이름 입력</b></p>
+            <input type="text" id="newTitleInput" placeholder="예: 후일담 1화, 89화 등">
+            
+            <button onclick="applyTitleChange()" class="btn-green">이 이름으로 싹 다 바꾸기 (임시 저장)</button>
+            <p id="saveStatus" class="status"></p>
+
+            <hr style="margin: 30px 0; border: 0; border-top: 1px solid #eee;">
+            
+            <p><b>4. 모든 작업 완료 후 포장하기</b></p>
+            <button onclick="downloadEPUB()">최종 EPUB 다운로드</button>
+            <p id="downloadStatus" class="status"></p>
+        </div>
+    </div>
+
+    <script>
+        let zip = new JSZip();
+        let chapters = []; // 목차 정보를 담을 배열
+        let ncxFilePath = ""; // 지도 파일 경로
+        
+        const epubInput = document.getElementById('epubInput');
+        const loadStatus = document.getElementById('loadStatus');
+        const saveStatus = document.getElementById('saveStatus');
+        const downloadStatus = document.getElementById('downloadStatus');
+        const select = document.getElementById('chapterSelect');
+        const titleInput = document.getElementById('newTitleInput');
+
+        // 정규식(특수기호) 안전 처리 함수
+        function escapeRegExp(string) {
+            return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+        // 1. EPUB 로드 및 목차(NCX) 파일 스캔
+        epubInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            loadStatus.innerText = "⏳ 구조를 뜯어보고 목차를 가져오는 중...";
+            loadStatus.className = "status";
+            document.getElementById('editorArea').style.display = 'none';
+            chapters = []; ncxFilePath = "";
+            
+            const reader = new FileReader();
+            reader.onload = async function(evt) {
+                try {
+                    zip = await JSZip.loadAsync(evt.target.result);
+                    
+                    // toc.ncx(목차 지도) 파일 찾기
+                    ncxFilePath = Object.keys(zip.files).find(k => k.endsWith('.ncx'));
+                    
+                    if (ncxFilePath) {
+                        const ncxContent = await zip.file(ncxFilePath).async("string");
+                        const parser = new DOMParser();
+                        const xmlDoc = parser.parseFromString(ncxContent, "text/xml");
+                        const navPoints = xmlDoc.getElementsByTagName("navPoint");
+                        
+                        select.innerHTML = '<option value="">-- 수정할 챕터 선택 --</option>';
+                        
+                        for (let i = 0; i < navPoints.length; i++) {
+                            const textEl = navPoints[i].getElementsByTagName("text")[0];
+                            const contentEl = navPoints[i].getElementsByTagName("content")[0];
+                            
+                            if (textEl && contentEl) {
+                                const title = textEl.textContent.trim();
+                                const src = contentEl.getAttribute("src").split('#')[0]; // 파일 주소
+                                
+                                // 주소를 통해 실제 HTML 파일 찾기 (경로 문제 해결을 위해 파일명으로 검색)
+                                const fileName = src.split('/').pop();
+                                const actualFilePath = Object.keys(zip.files).find(k => k.endsWith(fileName));
+                                
+                                if(actualFilePath && title) {
+                                    chapters.push({ path: actualFilePath, title: title });
+                                    
+                                    const option = document.createElement('option');
+                                    option.value = actualFilePath;
+                                    option.text = title;
+                                    select.appendChild(option);
+                                }
+                            }
+                        }
+                        document.getElementById('editorArea').style.display = 'block';
+                        loadStatus.innerText = "✅ 성공! 수정할 챕터를 선택하고 새 이름을 적어주세요.";
+                        loadStatus.className = "status success";
+                    } else {
+                        throw new Error("목차 지도(NCX) 파일을 찾을 수 없는 특수 EPUB입니다.");
+                    }
+                } catch (err) {
+                    loadStatus.innerText = "❌ 오류: " + err.message;
+                    loadStatus.className = "status error";
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        // 2. 챕터 선택 시, 현재 이름을 입력창에 미리 띄워주기
+        select.addEventListener('change', function(e) {
+            saveStatus.innerText = "";
+            const selectedPath = e.target.value;
+            const chapter = chapters.find(c => c.path === selectedPath);
+            
+            if (chapter) {
+                titleInput.value = chapter.title;
+            } else {
+                titleInput.value = "";
+            }
+        });
+
+        // 3. 기계가 3곳(본문 태그, 본문 제목, 목차 지도)을 모두 찾아내 자동 수정
+        async function applyTitleChange() {
+            const selectedPath = select.value;
+            const newTitle = titleInput.value.trim();
+            const chapterIndex = chapters.findIndex(c => c.path === selectedPath);
+            
+            if (!selectedPath || !newTitle || chapterIndex === -1) {
+                alert("챕터를 선택하고 새로운 이름을 입력해주세요!");
+                return;
+            }
+
+            const oldTitle = chapters[chapterIndex].title;
+            saveStatus.innerText = "⏳ " + oldTitle + " ➔ " + newTitle + " 변경 중...";
+            saveStatus.className = "status";
+
+            try {
+                const parser = new DOMParser();
+                const serializer = new XMLSerializer();
+
+                // [작업 A] toc.ncx 목차 지도 파일 수정 (도서 앱의 목차 메뉴 변경)
+                let ncxContent = await zip.file(ncxFilePath).async("string");
+                let ncxDoc = parser.parseFromString(ncxContent, "text/xml");
+                let navLabels = ncxDoc.getElementsByTagName("navLabel");
+                
+                // 구 목차 이름(oldTitle)을 찾아 신규 이름으로 덮어쓰기
+                for(let i=0; i<navLabels.length; i++) {
+                    let textNode = navLabels[i].getElementsByTagName("text")[0];
+                    if(textNode && textNode.textContent.trim() === oldTitle) {
+                        textNode.textContent = newTitle;
+                    }
+                }
+                zip.file(ncxFilePath, serializer.serializeToString(ncxDoc));
+
+                // [작업 B] 실제 본문 HTML 파일 내부 수정 (뷰어 화면 변경)
+                let htmlContent = await zip.file(selectedPath).async("string");
+                
+                // 1) 보이지 않는 탭 이름 <title> 수정
+                htmlContent = htmlContent.replace(/<title>.*?<\/title>/ig, `<title>${newTitle}</title>`);
+                
+                // 2) 본문에 크게 보이는 <h1>, <h2> 안의 구 제목을 신규 제목으로 수정
+                // 정규식을 사용해 태그 안의 텍스트만 안전하게 교체
+                const safeOldTitle = escapeRegExp(oldTitle);
+                const headerRegex = new RegExp(`(<h[1-6][^>]*>\\s*)${safeOldTitle}(\\s*<\/h[1-6]>)`, "ig");
+                htmlContent = htmlContent.replace(headerRegex, `$1${newTitle}$2`);
+
+                zip.file(selectedPath, htmlContent);
+
+                // 내부 데이터 배열 업데이트 (연속 수정할 경우를 대비)
+                chapters[chapterIndex].title = newTitle;
+                select.options[select.selectedIndex].text = newTitle;
+                
+                saveStatus.innerText = "✅ 변경 완벽 적용! (도서 앱 목차까지 동기화됨)";
+                saveStatus.className = "status success";
+
+            } catch (error) {
+                saveStatus.innerText = "❌ 수정 실패: " + error.message;
+                saveStatus.className = "status error";
+            }
+        }
+
+        // 4. 최종 다운로드
+        function downloadEPUB() {
+            downloadStatus.innerText = "⏳ 최종 EPUB으로 재포장 중...";
+            downloadStatus.className = "status";
+            
+            // 뷰어 오류 방지(mimetype 무압축)
+            zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+            
+            zip.generateAsync({
+                type: "blob",
+                mimeType: "application/epub+zip",
+                compression: "DEFLATE",
+                compressionOptions: { level: 6 }
+            }).then(function(blob) {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = "목차완벽수정_" + epubInput.files[0].name;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                
+                downloadStatus.innerText = "✅ 다운로드 성공! '파일' 앱에서 확인하세요.";
+                downloadStatus.className = "status success";
+            }).catch(function(err) {
+                downloadStatus.innerText = "❌ 다운로드 오류: " + err.message;
+                downloadStatus.className = "status error";
+            });
+        }
+    </script>
+</body>
+</html>
