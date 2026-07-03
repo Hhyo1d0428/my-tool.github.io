@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EPUB 챕터 편집기</title>
+    <!-- 압축 해제 및 재압축을 위한 JSZip 라이브러리 불러오기 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body { font-family: -apple-system, sans-serif; padding: 15px; background: #f9f9f9; line-height: 1.5; }
+        .box { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        select, textarea, button, input { width: 100%; margin-top: 10px; box-sizing: border-box; font-size: 15px; }
+        select { padding: 10px; border-radius: 8px; border: 1px solid #ccc; }
+        textarea { height: 350px; font-family: monospace; padding: 12px; border-radius: 8px; border: 1px solid #ccc; background: #f4f4f4; resize: none; }
+        button { background-color: #007aff; color: white; border: none; padding: 14px; font-size: 16px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-top: 15px; }
+        button:active { background-color: #005bb5; }
+        .btn-green { background-color: #34c759; }
+        .btn-green:active { background-color: #248a3d; }
+        .status { font-weight: bold; margin-top: 10px; text-align: center; }
+        .success { color: #28a745; }
+        .error { color: #dc3545; }
+        .warning-box { background-color: #fff3cd; color: #856404; padding: 10px; border-radius: 8px; font-size: 14px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h2>EPUB 챕터 편집기 📖</h2>
+        <p>1. 수정할 EPUB 파일을 선택하세요. (9.5MB 대용량 지원)</p>
+        <input type="file" id="epubInput" accept=".epub">
+        <p id="loadStatus" class="status"></p>
+        
+        <div id="editorArea" style="display:none; margin-top:10px;">
+            <p>2. 수정하고 싶은 챕터(파일)를 선택하세요.<br><small style="color:gray;">* 보통 OEBPS/Text/ 내부에 있는 .xhtml 또는 .html 파일이 소설의 본문입니다.</small></p>
+            <select id="fileSelect">
+                <option value="">-- 파일 선택 --</option>
+            </select>
+            
+            <div class="warning-box">
+                ⚠️ <strong>주의:</strong> 글자 사이에 있는 <code>&lt;p&gt;</code>, <code>&lt;br/&gt;</code> 같은 영어 괄호(HTML 태그)는 글꼴이나 줄바꿈을 유지하는 뼈대이므로 <strong>절대 지우지 말고 텍스트만 수정하세요!</strong>
+            </div>
+
+            <p>3. 내용을 수정하세요.</p>
+            <textarea id="fileContent" placeholder="여기에 챕터 내용이 표시됩니다."></textarea>
+            
+            <button onclick="saveChanges()" class="btn-green">수정 사항 적용하기 (임시 저장)</button>
+            <p id="saveStatus" class="status"></p>
+
+            <hr style="margin: 25px 0; border: 0; border-top: 1px solid #eee;">
+            
+            <p>4. 모든 수정을 마쳤다면, 하나의 EPUB으로 다시 포장합니다.</p>
+            <button onclick="downloadEPUB()">최종 EPUB 다운로드</button>
+            <p id="downloadStatus" class="status"></p>
+        </div>
+    </div>
+
+    <script>
+        let zip = new JSZip();
+        let currentFile = "";
+        
+        const epubInput = document.getElementById('epubInput');
+        const loadStatus = document.getElementById('loadStatus');
+        const saveStatus = document.getElementById('saveStatus');
+        const downloadStatus = document.getElementById('downloadStatus');
+        const select = document.getElementById('fileSelect');
+        const textarea = document.getElementById('fileContent');
+
+        // 1. EPUB 파일 불러오기 및 압축 해제
+        epubInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            loadStatus.innerText = "⏳ EPUB 구조를 분석하는 중...";
+            loadStatus.className = "status";
+            saveStatus.innerText = ""; downloadStatus.innerText = "";
+            document.getElementById('editorArea').style.display = 'none';
+            
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                zip.loadAsync(evt.target.result).then(function(loadedZip) {
+                    zip = loadedZip;
+                    select.innerHTML = '<option value="">-- 파일 선택 --</option>';
+                    
+                    // HTML, XHTML, XML 파일만 목록에 표시
+                    Object.keys(zip.files).forEach(function(filename) {
+                        if (!zip.files[filename].dir && filename.match(/\.(html|xhtml|xml)$/i)) {
+                            const option = document.createElement('option');
+                            option.value = filename;
+                            option.text = filename;
+                            select.appendChild(option);
+                        }
+                    });
+                    
+                    document.getElementById('editorArea').style.display = 'block';
+                    loadStatus.innerText = "✅ 분석 완료! 수정할 챕터를 선택하세요.";
+                    loadStatus.className = "status success";
+                }).catch(function(err) {
+                    loadStatus.innerText = "❌ 오류 발생: " + err.message;
+                    loadStatus.className = "status error";
+                });
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        // 2. 선택한 챕터의 텍스트 보여주기
+        select.addEventListener('change', function(e) {
+            currentFile = e.target.value;
+            saveStatus.innerText = "";
+            if (!currentFile) {
+                textarea.value = "";
+                return;
+            }
+            
+            zip.file(currentFile).async("string").then(function(content) {
+                textarea.value = content;
+            });
+        });
+
+        // 3. 수정한 내용을 압축 파일 내부에 임시 저장
+        function saveChanges() {
+            if (!currentFile) {
+                alert("먼저 수정할 파일을 선택해주세요.");
+                return;
+            }
+            const newContent = textarea.value;
+            zip.file(currentFile, newContent); // 수정된 내용 덮어쓰기
+            saveStatus.innerText = "✅ 성공적으로 적용되었습니다! (다른 챕터도 계속 수정 가능)";
+            saveStatus.className = "status success";
+        }
+
+        // 4. EPUB 규격에 맞춰 다시 압축 및 다운로드
+        function downloadEPUB() {
+            downloadStatus.innerText = "⏳ 재포장 중... (아이폰 다운로드 창이 뜰 때까지 기다려주세요)";
+            downloadStatus.className = "status";
+            
+            // 뷰어(애플 도서 등)가 파일을 거부하지 않도록 mimetype을 최상단 무압축 상태로 강제 지정
+            zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+            
+            zip.generateAsync({
+                type: "blob",
+                mimeType: "application/epub+zip",
+                compression: "DEFLATE",
+                compressionOptions: { level: 6 }
+            }).then(function(blob) {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = "수정완료_" + epubInput.files[0].name;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                
+                downloadStatus.innerText = "✅ 다운로드 성공! 아이폰 '파일' 앱을 확인하세요.";
+                downloadStatus.className = "status success";
+            }).catch(function(err) {
+                downloadStatus.innerText = "❌ 다운로드 오류: " + err.message;
+                downloadStatus.className = "status error";
+            });
+        }
+    </script>
+</body>
+</html>
