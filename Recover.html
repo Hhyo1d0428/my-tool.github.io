@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>만능 텍스트 복구기</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; padding: 20px; line-height: 1.6; background: #f0f2f5; }
+        .box { max-width: 450px; margin: 0 auto; text-align: center; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        select, input[type="file"], button { width: 100%; margin-top: 15px; box-sizing: border-box; font-size: 16px; }
+        select { padding: 12px; border-radius: 8px; border: 1px solid #ccc; font-weight: bold; }
+        button { background-color: #007aff; color: white; border: none; padding: 14px; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        button:active { background-color: #005bb5; }
+        #status { margin-top: 15px; font-weight: bold; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h2>만능 텍스트 복구기 🛠️</h2>
+        <p>어떤 외계어로 깨졌는지 선택하면<br><b>영구적인 UTF-8 정상 파일</b>로 고쳐줍니다.</p>
+        
+        <select id="encodingSelect">
+            <option value="euc-kr">1. [½ÃÀÛÀº...] 이런 유럽 특수기호로 깨질 때 (EUC-KR 원본)</option>
+            <option value="utf-8">2. [苫肰...] 이런 한자/알 수 없는 글자로 깨질 때 (UTF-8 원본)</option>
+        </select>
+
+        <input type="file" id="fileInput" accept=".txt">
+        <button onclick="convertFile()">영구 복구 후 다운로드</button>
+        
+        <p id="status"></p>
+    </div>
+
+    <script>
+        function convertFile() {
+            const fileInput = document.getElementById('fileInput');
+            const encodingSelect = document.getElementById('encodingSelect').value;
+            const status = document.getElementById('status');
+
+            if (fileInput.files.length === 0) {
+                status.style.color = "red";
+                status.innerText = "❌ 파일을 먼저 선택해주세요!";
+                return;
+            }
+
+            const file = fileInput.files[0];
+            status.style.color = "blue";
+            status.innerText = "⏳ 변환 중... (약 1~2초 소요)";
+
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                try {
+                    const arrayBuffer = e.target.result;
+                    
+                    // 사용자가 선택한 방식(euc-kr 또는 utf-8)으로 원본을 똑똑하게 읽어들임
+                    const decoder = new TextDecoder(encodingSelect);
+                    const text = decoder.decode(arrayBuffer);
+
+                    // 어떤 방식을 선택했든, 결과물은 무조건 만국 공통 표준인 UTF-8로 영구 저장함 (BOM 추가)
+                    const blob = new Blob(["\uFEFF" + text], { type: 'text/plain;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = '복구완료_' + file.name;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+
+                    status.style.color = "green";
+                    status.innerText = "✅ 복구 성공! 다운로드 폴더를 확인하세요.";
+                } catch (error) {
+                    status.style.color = "red";
+                    status.innerText = "❌ 오류 발생: " + error.message;
+                }
+            };
+
+            reader.onerror = function() {
+                status.style.color = "red";
+                status.innerText = "❌ 파일을 읽는 중 오류가 발생했습니다.";
+            };
+
+            reader.readAsArrayBuffer(file);
+        }
+    </script>
+</body>
+</html>
