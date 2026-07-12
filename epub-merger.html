@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EPUB 다중 합본(병합) 프로그램</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body { font-family: -apple-system, sans-serif; padding: 15px; background: #f0f2f5; line-height: 1.5; }
+        .box { max-width: 600px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        h2 { margin-top: 0; color: #1a1a1a; }
+        input[type="text"], input[type="file"], button { width: 100%; margin-top: 8px; margin-bottom: 15px; box-sizing: border-box; font-size: 16px; }
+        input[type="text"] { padding: 12px; border-radius: 8px; border: 1px solid #ccc; font-weight: bold; }
+        button { background-color: #007aff; color: white; border: none; padding: 15px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-top: 5px; }
+        button:active { background-color: #005bb5; }
+        .btn-green { background-color: #34c759; }
+        .btn-green:active { background-color: #248a3d; }
+        .btn-red { background-color: #ff3b30; padding: 8px 12px; font-size: 14px; margin-top: 0; color: white; border: none; border-radius: 6px; }
+        .btn-move { background-color: #5856d6; padding: 8px 12px; font-size: 14px; margin-top: 0; width: 45%; color: white; border: none; border-radius: 6px; }
+        .file-item { background: #f9f9f9; padding: 12px; border-radius: 8px; margin-top: 10px; border: 1px solid #ddd; display: flex; flex-direction: column; gap: 10px; }
+        .file-controls { display: flex; justify-content: space-between; gap: 5px; }
+        .toc-item { display: flex; gap: 8px; margin-top: 8px; align-items: center; background: #f9f9f9; padding: 8px; border-radius: 8px; border: 1px solid #eee; transition: all 0.2s; }
+        .toc-item input { margin-top: 0; margin-bottom: 0; padding: 10px; flex-grow: 1; }
+        .toc-del-btn { background-color: #ff3b30; width: 50px; padding: 10px 0; margin: 0; }
+        .status { font-weight: bold; margin-top: 10px; text-align: center; font-size: 14px; }
+        .success { color: #28a745; }
+        .error { color: #dc3545; }
+        .info-box { background-color: #e7f3fe; color: #0c5460; padding: 12px; border-radius: 8px; font-size: 14px; margin-top: 15px; margin-bottom: 20px; }
+        label { font-weight: bold; font-size: 14px; color: #555; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h2>EPUB 다중 합본기 📚</h2>
+        
+        <div class="info-box">
+            💡 <b>업데이트:</b> 원본 책이 가지고 있던 '상위/하위(폴더) 목차 계층 구조'가 무너지지 않고 완벽하게 병합되도록 수정되었습니다.
+        </div>
+
+        <label>1. 합칠 EPUB 파일들 추가 (순서 무관)</label>
+        <input type="file" id="epubInput" accept=".epub" multiple>
+        
+        <div id="fileListContainer"></div>
+
+        <div id="metaSection" style="display:none; margin-top: 25px;">
+            <label>2. 파일 저장 설정 및 메타데이터</label>
+            <input type="text" id="fileName" placeholder="저장될 파일 이름 (예: 합본최종.epub)">
+            <input type="text" id="bookTitle" placeholder="뷰어에 보일 책 제목 (예: 내가 키운 S급 완전판)">
+            <input type="text" id="bookAuthor" placeholder="저자 이름">
+            
+            <button onclick="processMerge()" class="btn-green">합본 분석 및 목차 생성 (1단계)</button>
+            <p id="processStatus" class="status"></p>
+        </div>
+
+        <div id="tocSection" style="display:none; margin-top: 25px; border-top: 2px dashed #ccc; padding-top: 20px;">
+            <label>3. 최종 목차 확인 및 정리</label>
+            <p style="font-size: 13px; color: gray; margin-top: 5px;">합쳐질 책의 목차입니다. 하위 항목은 들여쓰기(↳)로 표시됩니다.</p>
+            <div id="tocList"></div>
+            
+            <button onclick="downloadMergedEPUB()">최종 합본 다운로드 (2단계)</button>
+            <p id="downloadStatus" class="status"></p>
+        </div>
+    </div>
+
+    <script>
+        let selectedFiles = [];
+        let mergedZip = new JSZip();
+        let finalTOC = [];
+        
+        const epubInput = document.getElementById('epubInput');
+        const fileListContainer = document.getElementById('fileListContainer');
+        const metaSection = document.getElementById('metaSection');
+        
+        function resolvePath(basePath, relativePath) {
+            let parts = basePath.split('/');
+            parts.pop(); 
+            let relParts = relativePath.split('/');
+            for (let p of relParts) {
+                if (p === '.') continue;
+                if (p === '..') parts.pop();
+                else parts.push(p);
+            }
+            return parts.join('/');
+        }
+
+        epubInput.addEventListener('change', function(e) {
+            for(let file of e.target.files) {
+                selectedFiles.push(file);
+            }
+            renderFileList();
+            epubInput.value = ""; 
+        });
+
+        function renderFileList() {
+            fileListContainer.innerHTML = "";
+            if(selectedFiles.length > 0) metaSection.style.display = "block";
+            else metaSection.style.display = "none";
+            
+            selectedFiles.forEach((file, index) => {
+                let div = document.createElement('div');
+                div.className = 'file-item';
+                div.innerHTML = `
+                    <div style="font-weight:bold; word-break:break-all;">${index + 1}. ${file.name}</div>
+                    <div class="file-controls">
+                        <button class="btn-move" onclick="moveFile(${index}, -1)">⬆️ 위로</button>
+                        <button class="btn-move" onclick="moveFile(${index}, 1)">⬇️ 아래로</button>
+                        <button class="btn-red" onclick="removeFile(${index})">❌ 제거</button>
+                    </div>
+                `;
+                fileListContainer.appendChild(div);
+            });
+        }
+
+        function moveFile(index, dir) {
+            if (index + dir < 0 || index + dir >= selectedFiles.length) return;
+            let temp = selectedFiles[index];
+            selectedFiles[index] = selectedFiles[index + dir];
+            selectedFiles[index + dir] = temp;
+            renderFileList();
+        }
+
+        function removeFile(index) {
+            selectedFiles.splice(index, 1);
+            renderFileList();
+        }
+
+        async function processMerge() {
+            if (selectedFiles.length < 1) return alert("파일을 추가해주세요.");
+            
+            const status = document.getElementById('processStatus');
+            status.innerText = "⏳ 파일들을 하나로 포장 중입니다... (10~20초 소요될 수 있습니다)";
+            status.className = "status";
+            document.getElementById('tocSection').style.display = "none";
+            
+            mergedZip = new JSZip();
+            mergedZip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+            
+            let combinedManifest = "";
+            let combinedSpine = "";
+            finalTOC = [];
+            let coverId = "";
+            
+            try {
+                for (let i = 0; i < selectedFiles.length; i++) {
+                    let fileZip = await JSZip.loadAsync(selectedFiles[i]);
+                    
+                    let containerXml = await fileZip.file("META-INF/container.xml").async("string");
+                    let containerDoc = new DOMParser().parseFromString(containerXml, "text/xml");
+                    let opfPath = containerDoc.getElementsByTagName("rootfile")[0].getAttribute("full-path");
+                    let opfContent = await fileZip.file(opfPath).async("string");
+                    let opfDoc = new DOMParser().parseFromString(opfContent, "text/xml");
+                    
+                    if (i === 0) {
+                        let titleTag = opfDoc.getElementsByTagName("dc:title")[0];
+                        let authorTag = opfDoc.getElementsByTagName("dc:creator")[0];
+                        let tempTitle = titleTag ? titleTag.textContent + " (합본)" : "합본";
+                        
+                        if(!document.getElementById('bookTitle').value) document.getElementById('bookTitle').value = tempTitle;
+                        if(!document.getElementById('fileName').value) document.getElementById('fileName').value = tempTitle + ".epub";
+                        if(authorTag && !document.getElementById('bookAuthor').value) document.getElementById('bookAuthor').value = authorTag.textContent;
+                        
+                        let metaTags = opfDoc.getElementsByTagName("meta");
+                        for (let meta of metaTags) {
+                            if (meta.getAttribute("name") === "cover") coverId = "b0_" + meta.getAttribute("content");
+                        }
+                    }
+
+                    let items = opfDoc.getElementsByTagName("item");
+                    for (let item of items) {
+                        let id = item.getAttribute("id");
+                        let href = item.getAttribute("href");
+                        let mediaType = item.getAttribute("media-type");
+                        let properties = item.getAttribute("properties");
+                        
+                        if (properties && properties.includes("nav")) {
+                            properties = properties.replace(/\bnav\b/g, "").trim();
+                        }
+                        
+                        let absolutePath = resolvePath(opfPath, href);
+                        let fileData = await fileZip.file(absolutePath).async("arraybuffer");
+                        
+                        let newPath = `book${i}/${absolutePath}`;
+                        mergedZip.file(newPath, fileData);
+                        
+                        let propAttr = properties ? ` properties="${properties}"` : "";
+                        if (i === 0 && ((properties && properties.includes("cover-image")) || id === coverId.replace("b0_", ""))) {
+                            coverId = `b${i}_${id}`;
+                        }
+                        
+                        combinedManifest += `<item id="b${i}_${id}" href="${newPath}" media-type="${mediaType}"${propAttr}/>\n`;
+                    }
+                    
+                    let itemrefs = opfDoc.getElementsByTagName("itemref");
+                    for (let ref of itemrefs) {
+                        combinedSpine += `<itemref idref="b${i}_${ref.getAttribute("idref")}"/>\n`;
+                    }
+
+                    // 목차를 추출할 때, 하위 폴더 구조(Level 깊이)를 기억하는 영리한 추출 로직
+                    let ncxPath = Object.keys(fileZip.files).find(k => k.endsWith('.ncx'));
+                    if (ncxPath) {
+                        let ncxContent = await fileZip.file(ncxPath).async("string");
+                        let ncxDoc = new DOMParser().parseFromString(ncxContent, "text/xml");
+                        let navMap = ncxDoc.getElementsByTagName("navMap")[0];
+                        
+                        if (navMap) {
+                            function parseNcxLevel(node, level) {
+                                for (let c = 0; c < node.children.length; c++) {
+                                    let child = node.children[c];
+                                    if (child.tagName === "navPoint") {
+                                        let textNode = child.getElementsByTagName("text")[0];
+                                        let contentNode = child.getElementsByTagName("content")[0];
+                                        if (textNode && contentNode) {
+                                            let absSrc = resolvePath(ncxPath, contentNode.getAttribute("src"));
+                                            finalTOC.push({ 
+                                                id: Math.random().toString(36).substr(2, 9), 
+                                                title: textNode.textContent.trim(), 
+                                                src: `book${i}/${absSrc}`,
+                                                level: level // 0이면 대메뉴, 1이면 하위메뉴, 2면 더 깊은 하위메뉴
+                                            });
+                                        }
+                                        // 자식이 또 있으면 재귀적으로 파고들어서 레벨을 +1 함
+                                        parseNcxLevel(child, level + 1);
+                                    }
+                                }
+                            }
+                            parseNcxLevel(navMap, 0);
+                        }
+                    }
+                }
+
+                let finalTitle = document.getElementById('bookTitle').value || "합본";
+                let finalAuthor = document.getElementById('bookAuthor').value || "작자미상";
+                let uuid = "urn:uuid:" + Date.now();
+                
+                let masterOPF = `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id">
+    <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+        <dc:title>${finalTitle}</dc:title>
+        <dc:creator>${finalAuthor}</dc:creator>
+        <dc:identifier id="pub-id">${uuid}</dc:identifier>
+        <dc:language>ko</dc:language>
+        ${coverId ? `<meta name="cover" content="${coverId}"/>` : ""}
+    </metadata>
+    <manifest>
+        <item id="master_ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+        <item id="master_nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+        ${combinedManifest}
+    </manifest>
+    <spine toc="master_ncx">
+        ${combinedSpine}
+    </spine>
+</package>`;
+
+                mergedZip.file("content.opf", masterOPF);
+                mergedZip.file("META-INF/container.xml", `<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`);
+
+                renderTOC();
+                status.innerText = "✅ 병합 완료! 하위 구조(폴더)가 완벽히 인식되었습니다.";
+                status.className = "status success";
+                document.getElementById('tocSection').style.display = "block";
+
+            } catch (err) {
+                status.innerText = "❌ 오류: " + err.message;
+                status.className = "status error";
+            }
+        }
+
+        function removeTOCItem(id) {
+            finalTOC = finalTOC.filter(item => item.id !== id);
+            renderTOC();
+        }
+
+        function renderTOC() {
+            const list = document.getElementById('tocList');
+            list.innerHTML = "";
+            finalTOC.forEach((item, idx) => {
+                let div = document.createElement('div');
+                div.className = "toc-item";
+                
+                // 깊이(Level)에 따라 좌측 여백을 주어 사용자에게 폴더 구조임을 시각적으로 안내
+                let indent = item.level * 25;
+                div.style.marginLeft = indent + "px";
+                
+                // 하위 메뉴일 경우 화살표 표시
+                let prefix = item.level > 0 ? "↳ " : "";
+                
+                div.innerHTML = `
+                    <span style="color:#666; font-size: 14px; min-width: 20px;">${idx+1}.</span>
+                    <span style="color:#007aff; font-weight: bold; font-size: 16px;">${prefix}</span>
+                    <input type="text" id="toc_input_${item.id}" value="${item.title}">
+                    <button class="btn-red toc-del-btn" onclick="removeTOCItem('${item.id}')">❌</button>
+                `;
+                list.appendChild(div);
+            });
+        }
+
+        async function downloadMergedEPUB() {
+            const status = document.getElementById('downloadStatus');
+            status.innerText = "⏳ 폴더 구조 복원 및 최종 파일 생성 중...";
+            status.className = "status";
+
+            // 1. 1차원 배열을 다시 다차원 계층 트리(Tree) 구조로 조립하는 고난도 작업
+            let rootNodes = [];
+            let path = [];
+
+            finalTOC.forEach(item => {
+                let userTitle = document.getElementById(`toc_input_${item.id}`).value;
+                let node = { title: userTitle, src: item.src, level: item.level, children: [] };
+
+                if (node.level === 0) {
+                    rootNodes.push(node);
+                    path = [node];
+                } else {
+                    let parentDepth = Math.min(node.level - 1, path.length - 1);
+                    if (parentDepth < 0) { // 만약 부모를 삭제했다면 본인을 독립시킴
+                        rootNodes.push(node);
+                        path = [node];
+                    } else {
+                        path[parentDepth].children.push(node);
+                        path[parentDepth + 1] = node;
+                        path.length = parentDepth + 2;
+                    }
+                }
+            });
+
+            // 2. 구형 지도(NCX)에 폴더 구조 적용하여 작성
+            let playOrder = 1;
+            function getNcxString(nodes) {
+                let xml = "";
+                nodes.forEach(n => {
+                    xml += `\n<navPoint id="navPoint-${playOrder}" playOrder="${playOrder}">
+                        <navLabel><text>${n.title}</text></navLabel>
+                        <content src="${n.src}"/>`;
+                    playOrder++;
+                    if (n.children.length > 0) xml += getNcxString(n.children);
+                    xml += `\n</navPoint>`;
+                });
+                return xml;
+            }
+            let ncxNavPoints = getNcxString(rootNodes);
+
+            // 3. 신형 지도(nav.xhtml)에 폴더 구조(<ol> 중첩) 적용하여 작성
+            function getNavString(nodes) {
+                let html = "";
+                nodes.forEach(n => {
+                    html += `\n<li><a href="${n.src}">${n.title}</a>`;
+                    if (n.children.length > 0) {
+                        html += "\n<ol>" + getNavString(n.children) + "\n</ol>";
+                    }
+                    html += `</li>`;
+                });
+                return html;
+            }
+            let htmlNavLis = getNavString(rootNodes);
+
+            let finalTitle = document.getElementById('bookTitle').value || "합본";
+            
+            let masterNCX = `<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3998/2012/vocab/structure/#" version="2005-1">
+    <head><meta name="dtb:uid" content="urn:uuid:${Date.now()}"/></head>
+    <docTitle><text>${finalTitle}</text></docTitle>
+    <navMap>${ncxNavPoints}</navMap>
+</ncx>`;
+            mergedZip.file("toc.ncx", masterNCX);
+
+            let masterNavHtml = `<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>${finalTitle}</title></head>
+<body>
+    <nav epub:type="toc" id="toc">
+        <h1>목차</h1>
+        <ol>
+            ${htmlNavLis}
+        </ol>
+    </nav>
+</body>
+</html>`;
+            mergedZip.file("nav.xhtml", masterNavHtml);
+
+            try {
+                const blob = await mergedZip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                
+                let customFileName = document.getElementById('fileName').value.trim();
+                if(!customFileName) customFileName = finalTitle + ".epub";
+                if(!customFileName.toLowerCase().endsWith('.epub')) customFileName += ".epub";
+                
+                a.download = customFileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                
+                status.innerText = "✅ 다운로드 성공! (애플 도서 앱에서 완벽한 폴더 목차를 확인하세요)";
+                status.className = "status success";
+            } catch(err) {
+                status.innerText = "❌ 다운로드 오류: " + err.message;
+                status.className = "status error";
+            }
+        }
+    </script>
+</body>
+</html>
