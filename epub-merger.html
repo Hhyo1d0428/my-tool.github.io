@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EPUB 올인원 스튜디오</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body { font-family: -apple-system, sans-serif; padding: 15px; background: #eef1f5; line-height: 1.5; margin: 0; }
+        .box { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        h2 { margin-top: 0; color: #1a1a1a; font-size: 20px; }
+        
+        /* 탭 메뉴 스타일 */
+        .tab-menu { display: flex; gap: 10px; margin-bottom: 20px; }
+        .tab-btn { flex: 1; padding: 12px; font-size: 15px; font-weight: bold; border-radius: 8px; border: none; background: #e0e4e8; color: #555; cursor: pointer; transition: 0.2s; }
+        .tab-btn.active { background: #007aff; color: white; }
+
+        input[type="text"], input[type="file"], button, select { width: 100%; margin-top: 8px; margin-bottom: 12px; box-sizing: border-box; font-size: 15px; }
+        input[type="text"], select { padding: 12px; border-radius: 8px; border: 1px solid #ccc; font-weight: bold; }
+        button { background-color: #007aff; color: white; border: none; padding: 14px; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        button:active { background-color: #005bb5; }
+        .btn-green { background-color: #34c759; }
+        .btn-green:active { background-color: #248a3d; }
+        .btn-red { background-color: #ff3b30; }
+        .btn-small { width: auto; padding: 8px 12px; font-size: 13px; margin: 2px; display: inline-block; border-radius: 6px; border: none; color: white; cursor: pointer; }
+        .btn-gray { background-color: #8e8e93; }
+        
+        .file-item, .toc-item, .search-item { background: #f9f9f9; padding: 12px; border-radius: 8px; margin-top: 8px; border: 1px solid #ddd; }
+        .toc-item { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; transition: all 0.2s; }
+        .toc-item input { flex-grow: 1; width: auto; margin: 0; padding: 8px; }
+        .toc-controls { display: flex; width: 100%; justify-content: space-between; margin-top: 5px; }
+
+        .status { font-weight: bold; margin-top: 10px; text-align: center; font-size: 14px; }
+        .success { color: #28a745; }
+        .error { color: #dc3545; }
+        .info-box { background-color: #e7f3fe; color: #0c5460; padding: 12px; border-radius: 8px; font-size: 13px; margin-bottom: 15px; }
+        label { font-weight: bold; font-size: 14px; color: #555; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <div class="tab-menu">
+            <button id="tabA" class="tab-btn active" onclick="switchTab('A')">A. 다중 합본기</button>
+            <button id="tabB" class="tab-btn" onclick="switchTab('B')">B. 목차 에디터</button>
+        </div>
+
+        <!-- ================= [ A. 다중 합본기 화면 ] ================= -->
+        <div id="sectionA">
+            <h2>📚 EPUB 다중 합본기</h2>
+            <div class="info-box">여러 권의 단행본을 하나의 책으로 묶습니다.</div>
+            
+            <label>1. EPUB 파일 추가</label>
+            <input type="file" id="epubInputA" accept=".epub" multiple>
+            <div id="fileListContainerA"></div>
+
+            <div id="metaSectionA" style="display:none; margin-top: 20px;">
+                <label>2. 파일 정보 설정</label>
+                <input type="text" id="fileNameA" placeholder="저장 파일명 (예: 합본.epub)">
+                <input type="text" id="bookTitleA" placeholder="책 제목">
+                <button onclick="processMergeA()" class="btn-green">분석 및 목차 생성 (1단계)</button>
+                <p id="statusA1" class="status"></p>
+            </div>
+
+            <div id="tocSectionA" style="display:none; margin-top: 20px; border-top: 2px dashed #ccc; padding-top: 15px;">
+                <label>3. 목차 정리 후 다운로드</label>
+                <div id="tocListA"></div>
+                <button onclick="downloadA()">최종 합본 다운로드 (2단계)</button>
+                <p id="statusA2" class="status"></p>
+            </div>
+        </div>
+
+        <!-- ================= [ B. 목차 정밀 에디터 화면 ] ================= -->
+        <div id="sectionB" style="display:none;">
+            <h2>📑 EPUB 정밀 목차 에디터</h2>
+            <div class="info-box">원하는 문구를 검색해 한 방에 하위 폴더로 쏙쏙 집어넣을 수 있습니다.</div>
+
+            <label>1. 수정할 EPUB 파일 1개 선택</label>
+            <input type="file" id="epubInputB" accept=".epub">
+            <p id="statusB1" class="status"></p>
+
+            <div id="editorSectionB" style="display:none;">
+                
+                <!-- 검색 및 일괄 추가 박스 -->
+                <div style="background: #fff3cd; padding: 15px; border-radius: 8px; border: 1px solid #ffeeba; margin-top: 15px;">
+                    <label style="color:#856404;">🔍 본문 검색으로 목차 일괄 추가</label>
+                    <p style="font-size:12px; color:#856404; margin-top:5px; margin-bottom:10px;">
+                        단어를 검색하고 체크박스를 누른 뒤, 원하는 대메뉴 아래에 한 번에 넣으세요! (미리보기로 헷갈림 방지)
+                    </p>
+                    <input type="text" id="searchKeywordB" placeholder="검색어 입력 (예: 1, 외전 등)">
+                    <button onclick="searchBodyTextB()" class="btn-green" style="margin-top:0;">본문 스캔하기</button>
+                    
+                    <div id="searchResultsB" style="margin-top:10px;"></div>
+                </div>
+
+                <div style="margin-top: 25px; border-top: 2px dashed #ccc; padding-top: 15px;">
+                    <label>🛠 현재 전체 목차 (구조 편집)</label>
+                    <div id="tocListB"></div>
+                </div>
+
+                <hr style="margin:25px 0; border:0; border-top:1px solid #ddd;">
+                <button onclick="downloadB()">수정된 최종 EPUB 다운로드</button>
+                <p id="statusB2" class="status"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function resolvePath(basePath, relativePath) {
+            let parts = basePath.split('/'); parts.pop(); 
+            let relParts = relativePath.split('/');
+            for (let p of relParts) {
+                if (p === '.') continue;
+                if (p === '..') parts.pop(); else parts.push(p);
+            }
+            return parts.join('/');
+        }
+
+        function switchTab(tab) {
+            document.getElementById('tabA').className = tab === 'A' ? 'tab-btn active' : 'tab-btn';
+            document.getElementById('tabB').className = tab === 'B' ? 'tab-btn active' : 'tab-btn';
+            document.getElementById('sectionA').style.display = tab === 'A' ? 'block' : 'none';
+            document.getElementById('sectionB').style.display = tab === 'B' ? 'block' : 'none';
+        }
+
+        /* =====================================================================
+           [ TAB A. 다중 합본기 ]
+           ===================================================================== */
+        let filesA = [], zipA = new JSZip(), tocA = [], coverIdA = "", titleA = "";
+
+        document.getElementById('epubInputA').addEventListener('change', e => {
+            for(let f of e.target.files) filesA.push(f); renderFilesA(); e.target.value = "";
+        });
+
+        function renderFilesA() {
+            const list = document.getElementById('fileListContainerA'); list.innerHTML = "";
+            document.getElementById('metaSectionA').style.display = filesA.length > 0 ? "block" : "none";
+            filesA.forEach((f, i) => {
+                list.innerHTML += `<div class="file-item"><b>${i+1}. ${f.name}</b>
+                <div><button class="btn-small btn-gray" onclick="moveA(${i}, -1)">⬆</button><button class="btn-small btn-gray" onclick="moveA(${i}, 1)">⬇</button><button class="btn-small btn-red" onclick="remA(${i})">❌</button></div></div>`;
+            });
+        }
+        function moveA(i, d) { if(i+d>=0 && i+d<filesA.length) { let t = filesA[i]; filesA[i] = filesA[i+d]; filesA[i+d] = t; renderFilesA(); } }
+        function remA(i) { filesA.splice(i, 1); renderFilesA(); }
+
+        async function processMergeA() {
+            let stat = document.getElementById('statusA1'); stat.innerText = "⏳ 포장 중..."; stat.className="status";
+            zipA = new JSZip(); zipA.file("mimetype", "application/epub+zip", {compression:"STORE"});
+            let man="", spi=""; tocA = []; coverIdA = "";
+
+            try {
+                for (let i = 0; i < filesA.length; i++) {
+                    let z = await JSZip.loadAsync(filesA[i]);
+                    let cXml = await z.file("META-INF/container.xml").async("string");
+                    let opfPath = new DOMParser().parseFromString(cXml, "text/xml").getElementsByTagName("rootfile")[0].getAttribute("full-path");
+                    let opfDoc = new DOMParser().parseFromString(await z.file(opfPath).async("string"), "text/xml");
+                    
+                    if (i === 0) {
+                        let t = opfDoc.getElementsByTagName("dc:title")[0];
+                        let name = t ? t.textContent+"(합본)" : "합본";
+                        if(!document.getElementById('bookTitleA').value) document.getElementById('bookTitleA').value = name;
+                        if(!document.getElementById('fileNameA').value) document.getElementById('fileNameA').value = name+".epub";
+                        for(let m of opfDoc.getElementsByTagName("meta")) if(m.getAttribute("name")==="cover") coverIdA = "b0_"+m.getAttribute("content");
+                    }
+                    for(let item of opfDoc.getElementsByTagName("item")) {
+                        let id = item.getAttribute("id"), prop = item.getAttribute("properties")||"";
+                        if(prop.includes("nav")) prop = prop.replace(/\bnav\b/g,"").trim();
+                        let aPath = resolvePath(opfPath, item.getAttribute("href"));
+                        zipA.file(`book${i}/${aPath}`, await z.file(aPath).async("arraybuffer"));
+                        if(i===0 && ((prop && prop.includes("cover-image")) || id===coverIdA.replace("b0_",""))) coverIdA = `b${i}_${id}`;
+                        man += `<item id="b${i}_${id}" href="book${i}/${aPath}" media-type="${item.getAttribute("media-type")}" ${prop?`properties="${prop}"`:""}/>\n`;
+                    }
+                    for(let ref of opfDoc.getElementsByTagName("itemref")) spi += `<itemref idref="b${i}_${ref.getAttribute("idref")}"/>\n`;
+
+                    let ncxP = Object.keys(z.files).find(k => k.endsWith('.ncx'));
+                    if(ncxP) {
+                        let nMap = new DOMParser().parseFromString(await z.file(ncxP).async("string"), "text/xml").getElementsByTagName("navMap")[0];
+                        if(nMap) {
+                            function parseL(node, lvl) {
+                                for (let c of node.children) {
+                                    if(c.tagName==="navPoint") {
+                                        let t = c.getElementsByTagName("text")[0], ct = c.getElementsByTagName("content")[0];
+                                        if(t && ct) tocA.push({id:Math.random().toString(36).substr(2,9), title:t.textContent.trim(), src:`book${i}/${resolvePath(ncxP, ct.getAttribute("src"))}`, lvl:lvl});
+                                        parseL(c, lvl+1);
+                                    }
+                                }
+                            }
+                            parseL(nMap, 0);
+                        }
+                    }
+                }
+                titleA = document.getElementById('bookTitleA').value || "합본";
+                let master = `<?xml version="1.0" encoding="utf-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${titleA}</dc:title><dc:identifier id="pid">urn:uuid:${Date.now()}</dc:identifier>${coverIdA?`<meta name="cover" content="${coverIdA}"/>`:""}</metadata><manifest><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>${man}</manifest><spine toc="ncx">${spi}</spine></package>`;
+                zipA.file("content.opf", master);
+                zipA.file("META-INF/container.xml", `<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`);
+                renderTocA(); stat.innerText="✅ 완료! 목차 정리 요망."; stat.className="status success"; document.getElementById('tocSectionA').style.display="block";
+            } catch(e) { stat.innerText="❌ "+e.message; stat.className="status error"; }
+        }
+
+        function renderTocA() {
+            const list = document.getElementById('tocListA'); list.innerHTML="";
+            tocA.forEach((item) => {
+                list.innerHTML += `<div class="toc-item" style="margin-left:${item.lvl*20}px"><span style="color:#007aff;font-weight:bold">${item.lvl>0?"↳":""}</span><input type="text" id="tA_${item.id}" value="${item.title}"><button class="btn-small btn-red" onclick="remTocA('${item.id}')">❌</button></div>`;
+            });
+        }
+        function remTocA(id) { tocA = tocA.filter(x => x.id !== id); renderTocA(); }
+
+        async function downloadA() {
+            let stat = document.getElementById('statusA2'); stat.innerText = "⏳ 생성 중..."; stat.className="status";
+            let roots = [], path = [];
+            tocA.forEach(item => {
+                let node = {title: document.getElementById(`tA_${item.id}`).value, src: item.src, lvl: item.lvl, child: []};
+                if(node.lvl===0) { roots.push(node); path=[node]; }
+                else { let pD = Math.min(node.lvl-1, path.length-1); if(pD<0){roots.push(node);path=[node];}else{path[pD].child.push(node);path[pD+1]=node;path.length=pD+2;} }
+            });
+            let o=1; function gN(nodes) { let x=""; nodes.forEach(n=>{x+=`<navPoint id="n${o}" playOrder="${o}"><navLabel><text>${n.title}</text></navLabel><content src="${n.src}"/>`; o++; if(n.child.length>0) x+=gN(n.child); x+=`</navPoint>`;}); return x; }
+            function gH(nodes) { let h=""; nodes.forEach(n=>{h+=`<li><a href="${n.src}">${n.title}</a>`; if(n.child.length>0) h+=`<ol>${gH(n.child)}</ol>`; h+=`</li>`;}); return h; }
+            zipA.file("toc.ncx", `<?xml version="1.0" encoding="UTF-8"?><ncx xmlns="http://www.daisy.org/z3998/2012/vocab/structure/#" version="2005-1"><head><meta name="dtb:uid" content="u${Date.now()}"/></head><docTitle><text>${titleA}</text></docTitle><navMap>${gN(roots)}</navMap></ncx>`);
+            zipA.file("nav.xhtml", `<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>${titleA}</title></head><body><nav epub:type="toc"><h1>목차</h1><ol>${gH(roots)}</ol></nav></body></html>`);
+            try {
+                let blob = await zipA.generateAsync({type:"blob", compression:"DEFLATE", compressionOptions:{level:6}});
+                let a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+                let fn = document.getElementById('fileNameA').value || "합본.epub";
+                a.download = fn.endsWith('.epub') ? fn : fn+".epub";
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                stat.innerText="✅ 다운로드 완료!"; stat.className="status success";
+            } catch(e) { stat.innerText="❌ "+e.message; stat.className="status error"; }
+        }
+
+        /* =====================================================================
+           [ TAB B. 목차 정밀 에디터 ]
+           ===================================================================== */
+        let zipB = new JSZip(), tocB = [], spineFilesB = [], oriFilenameB = "", titleB = "";
+
+        document.getElementById('epubInputB').addEventListener('change', async function(e) {
+            let f = e.target.files[0]; if(!f) return; oriFilenameB = f.name;
+            let stat = document.getElementById('statusB1'); stat.innerText = "⏳ 로드 중..."; stat.className="status";
+            try {
+                zipB = await JSZip.loadAsync(f); tocB = []; spineFilesB = [];
+                let cXml = await zipB.file("META-INF/container.xml").async("string");
+                let opfPathB = new DOMParser().parseFromString(cXml, "text/xml").getElementsByTagName("rootfile")[0].getAttribute("full-path");
+                let opfDoc = new DOMParser().parseFromString(await zipB.file(opfPathB).async("string"), "text/xml");
+                titleB = opfDoc.getElementsByTagName("dc:title")[0]?.textContent || "수정본";
+                
+                let manifest = {};
+                for(let item of opfDoc.getElementsByTagName("item")) manifest[item.getAttribute("id")] = resolvePath(opfPathB, item.getAttribute("href"));
+                for(let ref of opfDoc.getElementsByTagName("itemref")) {
+                    let href = manifest[ref.getAttribute("idref")]; if(href && href.match(/\.(html|xhtml)$/i)) spineFilesB.push(href);
+                }
+
+                let ncxP = Object.keys(zipB.files).find(k => k.endsWith('.ncx'));
+                if(ncxP) {
+                    let nMap = new DOMParser().parseFromString(await zipB.file(ncxP).async("string"), "text/xml").getElementsByTagName("navMap")[0];
+                    if(nMap) {
+                        function parseLB(node, lvl) {
+                            for (let c of node.children) {
+                                if(c.tagName==="navPoint") {
+                                    let t = c.getElementsByTagName("text")[0], ct = c.getElementsByTagName("content")[0];
+                                    if(t && ct) tocB.push({id:Math.random().toString(36).substr(2,9), title:t.textContent.trim(), src:resolvePath(ncxP, ct.getAttribute("src")), lvl:lvl});
+                                    parseLB(c, lvl+1);
+                                }
+                            }
+                        }
+                        parseLB(nMap, 0);
+                    }
+                }
+                renderTocB(); stat.innerText="✅ 완료! 검색을 시작하세요."; stat.className="status success"; document.getElementById('editorSectionB').style.display="block";
+            } catch(err) { stat.innerText="❌ 오류: "+err.message; stat.className="status error"; }
+        });
+
+        // 🔍 향상된 스캔: 파일명과 내용 미리보기 추출
+        async function searchBodyTextB() {
+            let kw = document.getElementById('searchKeywordB').value.trim();
+            let resDiv = document.getElementById('searchResultsB');
+            if(!kw) { alert("검색어를 입력하세요."); return; }
+            resDiv.innerHTML = "<p>⏳ 스캔 중...</p>";
+            let resultsHTML = ""; let count = 0;
+            
+            for(let path of spineFilesB) {
+                let html = await zipB.file(path).async("string");
+                let doc = new DOMParser().parseFromString(html, "text/html");
+                let elements = doc.querySelectorAll("p, h1, h2, h3, div");
+                
+                for(let i=0; i<elements.length; i++) {
+                    let txt = elements[i].textContent.trim();
+                    if(txt.includes(kw) && txt.length < 150 && txt.length > 0) {
+                        // 내용 미리보기 추출 (다음 문단 찾기)
+                        let context = ""; let next = elements[i].nextElementSibling;
+                        while(next && !context) { context = next.textContent.trim().substring(0, 30); next = next.nextElementSibling; }
+                        if(!context) context = "내용 없음";
+                        
+                        let safeTxt = txt.replace(/"/g, "&quot;");
+                        let fileName = path.split('/').pop();
+                        
+                        resultsHTML += `
+                        <label class="search-item" style="display:flex; gap:10px; cursor:pointer; align-items:flex-start;">
+                            <input type="checkbox" class="search-check" data-path="${path}" data-txt="${safeTxt}" style="width:22px; height:22px; margin-top:2px;">
+                            <div style="flex:1;">
+                                <div style="font-size:15px; font-weight:bold; color:#007aff;">📄 ${txt}</div>
+                                <div style="font-size:12px; color:gray; margin-top:2px;">📂 파일명: ${fileName}</div>
+                                <div style="font-size:13px; color:#444; margin-top:4px; background:#e9ecef; padding:6px; border-radius:5px;">💬 미리보기: "${context}..."</div>
+                            </div>
+                        </label>`;
+                        count++;
+                    }
+                }
+            }
+            if(count > 0) {
+                resDiv.innerHTML = `
+                    <div style="display:flex; gap:10px; margin-bottom:10px;">
+                        <button class="btn-small btn-gray" onclick="document.querySelectorAll('.search-check').forEach(c=>c.checked=true)">전체 선택</button>
+                        <button class="btn-small btn-gray" onclick="document.querySelectorAll('.search-check').forEach(c=>c.checked=false)">선택 해제</button>
+                    </div>
+                    <div style="max-height:250px; overflow-y:auto; border:1px solid #ccc; border-radius:8px; padding:10px; background:#fff;">${resultsHTML}</div>
+                    
+                    <div style="margin-top:15px; padding:12px; background:#d4edda; border-radius:8px; border:1px solid #c3e6cb;">
+                        <label style="color:#155724;">🎯 어느 대메뉴 아래에 넣을까요?</label>
+                        <select id="targetParentB" style="margin-top:8px;"></select>
+                        <button onclick="insertBatchTocB()" class="btn-green" style="margin-top:10px;">체크된 항목 일괄 추가하기</button>
+                    </div>
+                `;
+                refreshParentSelectB();
+            } else { resDiv.innerHTML = "<p style='color:red;'>결과가 없습니다.</p>"; }
+        }
+
+        // 드롭다운 새로고침
+        function refreshParentSelectB() {
+            let sel = document.getElementById('targetParentB'); if(!sel) return;
+            let currentVal = sel.value;
+            sel.innerHTML = '<option value="">-- 부모 지정 안 함 (맨 아래 추가) --</option>';
+            tocB.forEach(item => {
+                let prefix = "　".repeat(item.lvl) + (item.lvl>0?"↳ ":"");
+                sel.innerHTML += `<option value="${item.id}">${prefix}${item.title}</option>`;
+            });
+            if(currentVal && tocB.some(x => x.id === currentVal)) sel.value = currentVal;
+        }
+
+        // 🎯 일괄 쏙쏙 추가 핵심 기능
+        async function insertBatchTocB() {
+            let checkboxes = document.querySelectorAll('.search-check:checked');
+            if(checkboxes.length === 0) return alert("체크된 항목이 없습니다.");
+            
+            let parentId = document.getElementById('targetParentB').value;
+            let insertIndex = tocB.length; 
+            let targetLvl = 0;
+            
+            if(parentId) {
+                let pIdx = tocB.findIndex(x => x.id === parentId);
+                targetLvl = tocB[pIdx].lvl + 1; // 부모보다 1단계 더 들여쓰기
+                insertIndex = pIdx + 1;
+                // 부모 밑에 이미 하위 항목들이 있다면 그 하위 항목들 맨 끝에 넣기 위함
+                while(insertIndex < tocB.length && tocB[insertIndex].lvl >= targetLvl) insertIndex++;
+            }
+            
+            for(let cb of checkboxes) {
+                let path = cb.getAttribute("data-path"), txt = cb.getAttribute("data-txt");
+                let html = await zipB.file(path).async("string");
+                
+                let anchorId = "t_" + Math.random().toString(36).substr(2,7);
+                let safeTxt = txt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
+                
+                // 본문에 안 보이는 좌표(앵커) 박기
+                let regex = new RegExp("(" + safeTxt + ")");
+                html = html.replace(regex, `<a id="${anchorId}"></a>$1`);
+                zipB.file(path, html);
+                
+                // 목차 배열에 삽입
+                tocB.splice(insertIndex, 0, { id: Math.random().toString(36).substr(2,9), title: txt, src: path + "#" + anchorId, lvl: targetLvl });
+                insertIndex++;
+            }
+            renderTocB();
+            alert(`✅ ${checkboxes.length}개 항목이 추가되었습니다! 아래 목차 리스트를 확인하세요.`);
+        }
+
+        function renderTocB() {
+            const list = document.getElementById('tocListB'); list.innerHTML="";
+            tocB.forEach((item, i) => {
+                list.innerHTML += `
+                <div class="toc-item" style="margin-left:${item.lvl*25}px">
+                    <span style="color:#007aff;font-weight:bold;font-size:18px;">${item.lvl>0?"↳":""}</span>
+                    <input type="text" id="tB_${item.id}" value="${item.title}">
+                    <div class="toc-controls">
+                        <div>
+                            <button class="btn-small btn-gray" onclick="chLvlB(${i}, -1)">↰ 레벨 빼기</button>
+                            <button class="btn-small btn-gray" onclick="chLvlB(${i}, 1)">들여쓰기 ↳</button>
+                        </div>
+                        <div>
+                            <button class="btn-small" style="background:#555;" onclick="moveB(${i}, -1)">⬆</button>
+                            <button class="btn-small" style="background:#555;" onclick="moveB(${i}, 1)">⬇</button>
+                            <button class="btn-small btn-red" onclick="remTocB('${item.id}')">❌</button>
+                        </div>
+                    </div>
+                </div>`;
+            });
+            refreshParentSelectB(); // 변경 시 드롭다운도 동기화
+        }
+
+        function chLvlB(i, d) { let n = tocB[i].lvl + d; if(n >= 0 && n <= 3) { tocB[i].lvl = n; renderTocB(); } }
+        function moveB(i, d) { if(i+d>=0 && i+d<tocB.length) { let t = tocB[i]; tocB[i] = tocB[i+d]; tocB[i+d] = t; renderTocB(); } }
+        function remTocB(id) { tocB = tocB.filter(x => x.id !== id); renderTocB(); }
+
+        async function downloadB() {
+            let stat = document.getElementById('statusB2'); stat.innerText = "⏳ 파일 생성 중..."; stat.className="status";
+            let roots = [], path = [];
+            tocB.forEach(item => {
+                let node = {title: document.getElementById(`tB_${item.id}`).value, src: item.src, lvl: item.lvl, child: []};
+                if(node.lvl===0) { roots.push(node); path=[node]; }
+                else { let pD = Math.min(node.lvl-1, path.length-1); if(pD<0){roots.push(node);path=[node];}else{path[pD].child.push(node);path[pD+1]=node;path.length=pD+2;} }
+            });
+            let o=1; function gN(nodes) { let x=""; nodes.forEach(n=>{x+=`<navPoint id="n${o}" playOrder="${o}"><navLabel><text>${n.title}</text></navLabel><content src="${n.src}"/>`; o++; if(n.child.length>0) x+=gN(n.child); x+=`</navPoint>`;}); return x; }
+            function gH(nodes) { let h=""; nodes.forEach(n=>{h+=`<li><a href="${n.src}">${n.title}</a>`; if(n.child.length>0) h+=`<ol>${gH(n.child)}</ol>`; h+=`</li>`;}); return h; }
+            
+            let ncxP = Object.keys(zipB.files).find(k => k.endsWith('.ncx'));
+            let navP = Object.keys(zipB.files).find(k => k.endsWith('nav.xhtml') || k.endsWith('toc.xhtml'));
+            
+            if(ncxP) zipB.file(ncxP, `<?xml version="1.0" encoding="UTF-8"?><ncx xmlns="http://www.daisy.org/z3998/2012/vocab/structure/#" version="2005-1"><head><meta name="dtb:uid" content="u${Date.now()}"/></head><docTitle><text>${titleB}</text></docTitle><navMap>${gN(roots)}</navMap></ncx>`);
+            if(navP) zipB.file(navP, `<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>${titleB}</title></head><body><nav epub:type="toc"><h1>목차</h1><ol>${gH(roots)}</ol></nav></body></html>`);
+
+            try {
+                let blob = await zipB.generateAsync({type:"blob", compression:"DEFLATE", compressionOptions:{level:6}});
+                let a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+                a.download = "목차수정_" + oriFilenameB;
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                stat.innerText="✅ 성공! 애플 도서 앱에서 열어보세요."; stat.className="status success";
+            } catch(e) { stat.innerText="❌ "+e.message; stat.className="status error"; }
+        }
+    </script>
+</body>
+</html>
