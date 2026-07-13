@@ -113,7 +113,6 @@
     </div>
 
     <script>
-        // 공통: XML 특수문자 안전 변환 함수
         function escapeXml(unsafe) {
             if(!unsafe) return "";
             return unsafe.replace(/[<>&'"]/g, function (c) {
@@ -124,7 +123,6 @@
             });
         }
 
-        // 공통: 위치 상관없이 안전한 상대 경로 계산 함수 (링크 깨짐 방지 핵심!)
         function getRelativePath(from, to) {
             if (!from) return to;
             let fromParts = from.split('/'); fromParts.pop(); 
@@ -196,10 +194,20 @@
                     for(let item of opfDoc.getElementsByTagName("item")) {
                         let id = item.getAttribute("id"), prop = item.getAttribute("properties")||"";
                         if(prop.includes("nav")) prop = prop.replace(/\bnav\b/g,"").trim();
-                        let aPath = resolvePath(opfPath, item.getAttribute("href"));
-                        zipA.file(`book${i}/${aPath}`, await z.file(aPath).async("arraybuffer"));
-                        if(i===0 && ((prop && prop.includes("cover-image")) || id===coverIdA.replace("b0_",""))) coverIdA = `b${i}_${id}`;
-                        man += `<item id="b${i}_${id}" href="book${i}/${aPath}" media-type="${item.getAttribute("media-type")}" ${prop?`properties="${prop}"`:""}/>\n`;
+                        
+                        // [버그 수정] 인코딩된 파일명(띄어쓰기 등)을 안전하게 디코딩
+                        let rawHref = item.getAttribute("href");
+                        try { rawHref = decodeURIComponent(rawHref); } catch(e) {}
+                        
+                        let aPath = resolvePath(opfPath, rawHref);
+                        let targetFile = z.file(aPath);
+                        
+                        // 파일이 실제로 존재할 때만 처리 (null 오류 원천 차단)
+                        if (targetFile) {
+                            zipA.file(`book${i}/${aPath}`, await targetFile.async("arraybuffer"));
+                            if(i===0 && ((prop && prop.includes("cover-image")) || id===coverIdA.replace("b0_",""))) coverIdA = `b${i}_${id}`;
+                            man += `<item id="b${i}_${id}" href="book${i}/${aPath}" media-type="${item.getAttribute("media-type")}" ${prop?`properties="${prop}"`:""}/>\n`;
+                        }
                     }
                     for(let ref of opfDoc.getElementsByTagName("itemref")) spi += `<itemref idref="b${i}_${ref.getAttribute("idref")}"/>\n`;
 
@@ -211,7 +219,11 @@
                                 for (let c of node.children) {
                                     if(c.tagName==="navPoint") {
                                         let t = c.getElementsByTagName("text")[0], ct = c.getElementsByTagName("content")[0];
-                                        if(t && ct) tocA.push({id:Math.random().toString(36).substr(2,9), title:t.textContent.trim(), src:`book${i}/${resolvePath(ncxP, ct.getAttribute("src"))}`, lvl:lvl});
+                                        if(t && ct) {
+                                            let srcAttr = ct.getAttribute("src");
+                                            try { srcAttr = decodeURIComponent(srcAttr); } catch(e) {}
+                                            tocA.push({id:Math.random().toString(36).substr(2,9), title:t.textContent.trim(), src:`book${i}/${resolvePath(ncxP, srcAttr)}`, lvl:lvl});
+                                        }
                                         parseL(c, lvl+1);
                                     }
                                 }
@@ -263,9 +275,9 @@
             } catch(e) { stat.innerText="❌ "+e.message; stat.className="status error"; }
         }
 
-        /* ==================== [ TAB B. 목차 정밀 에디터 (장바구니 도입) ] ==================== */
+        /* ==================== [ TAB B. 목차 정밀 에디터 ] ==================== */
         let zipB = new JSZip(), tocB = [], spineFilesB = [], oriFilenameB = "", titleB = "";
-        let stagedItemsB = []; // 장바구니 배열
+        let stagedItemsB = []; 
 
         document.getElementById('epubInputB').addEventListener('change', async function(e) {
             let f = e.target.files[0]; if(!f) return; oriFilenameB = f.name;
@@ -278,7 +290,11 @@
                 titleB = opfDoc.getElementsByTagName("dc:title")[0]?.textContent || "수정본";
                 
                 let manifest = {};
-                for(let item of opfDoc.getElementsByTagName("item")) manifest[item.getAttribute("id")] = resolvePath(opfPathB, item.getAttribute("href"));
+                for(let item of opfDoc.getElementsByTagName("item")) {
+                    let rawHref = item.getAttribute("href");
+                    try { rawHref = decodeURIComponent(rawHref); } catch(e) {}
+                    manifest[item.getAttribute("id")] = resolvePath(opfPathB, rawHref);
+                }
                 for(let ref of opfDoc.getElementsByTagName("itemref")) {
                     let href = manifest[ref.getAttribute("idref")]; if(href && href.match(/\.(html|xhtml)$/i)) spineFilesB.push(href);
                 }
@@ -291,7 +307,11 @@
                             for (let c of node.children) {
                                 if(c.tagName==="navPoint") {
                                     let t = c.getElementsByTagName("text")[0], ct = c.getElementsByTagName("content")[0];
-                                    if(t && ct) tocB.push({id:Math.random().toString(36).substr(2,9), title:t.textContent.trim(), src:resolvePath(ncxP, ct.getAttribute("src")), lvl:lvl});
+                                    if(t && ct) {
+                                        let srcAttr = ct.getAttribute("src");
+                                        try { srcAttr = decodeURIComponent(srcAttr); } catch(e) {}
+                                        tocB.push({id:Math.random().toString(36).substr(2,9), title:t.textContent.trim(), src:resolvePath(ncxP, srcAttr), lvl:lvl});
+                                    }
                                     parseLB(c, lvl+1);
                                 }
                             }
@@ -304,7 +324,6 @@
             } catch(err) { stat.innerText="❌ 오류: "+err.message; stat.className="status error"; }
         });
 
-        // 1. 검색 기능
         async function searchBodyTextB() {
             let kw = document.getElementById('searchKeywordB').value.trim();
             let resDiv = document.getElementById('searchResultsB');
@@ -353,7 +372,6 @@
             } else { resDiv.innerHTML = "<p style='color:red;'>결과가 없습니다.</p>"; }
         }
 
-        // 2. 장바구니 로직
         function addToStagingB() {
             let checkboxes = document.querySelectorAll('.search-check:checked');
             let count = 0;
@@ -387,7 +405,6 @@
         function removeStagedB(idx) { stagedItemsB.splice(idx, 1); renderStagingB(); }
         function clearStagingB() { stagedItemsB = []; renderStagingB(); }
 
-        // 3. 드롭다운 동기화
         function refreshParentSelectB() {
             let sel = document.getElementById('targetParentB'); if(!sel) return;
             let currentVal = sel.value;
@@ -399,7 +416,6 @@
             if(currentVal && tocB.some(x => x.id === currentVal)) sel.value = currentVal;
         }
 
-        // 4. 일괄 삽입 및 안전 앵커 박기 로직
         async function insertStagedTocB() {
             if(stagedItemsB.length === 0) return alert("대기열이 비어있습니다.");
             let parentId = document.getElementById('targetParentB').value;
@@ -417,7 +433,6 @@
                 let anchorId = "t_" + Math.random().toString(36).substr(2,7);
                 let injected = false;
                 
-                // 1차 시도: 안전한 DOM 파싱 방식 (구조 안 망가뜨림)
                 try {
                     let parser = new DOMParser();
                     let doc = parser.parseFromString(html, "application/xhtml+xml");
@@ -430,7 +445,6 @@
                     }
                 } catch(e) {}
                 
-                // 2차 시도: DOM 파싱 실패 시 정규식(안전 문자열)으로 폴백
                 if (!injected) {
                     let safeTxt = item.txt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
                     html = html.replace(new RegExp("(" + safeTxt + ")"), `<a id="${anchorId}"></a>$1`);
@@ -444,7 +458,6 @@
             alert("✅ 대기열의 모든 항목이 지정된 위치에 완벽하게 추가되었습니다!");
         }
 
-        // 5. 목차 관리 UI
         function renderTocB() {
             const list = document.getElementById('tocListB'); list.innerHTML="";
             tocB.forEach((item, i) => {
@@ -465,7 +478,6 @@
         function moveB(i, d) { if(i+d>=0 && i+d<tocB.length) { let t = tocB[i]; tocB[i] = tocB[i+d]; tocB[i+d] = t; renderTocB(); } }
         function remTocB(id) { tocB = tocB.filter(x => x.id !== id); renderTocB(); }
 
-        // 6. 다운로드 (상대 경로 적용)
         async function downloadB() {
             let stat = document.getElementById('statusB2'); stat.innerText = "⏳ 파일 생성 중..."; stat.className="status";
             let roots = [], path = [];
