@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>웹소설 관리 앱</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 15px; margin: 0; background-color: #f2f2f7; color: #1c1c1e; }
+        h2 { text-align: center; font-size: 22px; margin-bottom: 20px; }
+        
+        /* 버튼 및 입력창 디자인 */
+        input[type="text"] { width: 100%; padding: 12px; margin-bottom: 10px; box-sizing: border-box; border: 1px solid #c7c7cc; border-radius: 10px; font-size: 16px; }
+        button { padding: 12px; margin: 5px 0; border: none; border-radius: 10px; font-size: 15px; font-weight: bold; cursor: pointer; width: 100%; box-sizing: border-box; color: white; }
+        
+        .btn-gdrive { background-color: #34A853; }
+        .btn-local { background-color: #007AFF; }
+        .btn-action { background-color: #5856D6; width: calc(50% - 3px); display: inline-block; }
+        .btn-filter { background-color: #8e8e93; width: 24%; padding: 8px 0; font-size: 12px; display: inline-block; }
+        .btn-danger { background-color: #FF3B30; }
+        
+        /* 숨겨진 파일 인풋 */
+        input[type="file"] { display: none; }
+        
+        /* 로그 및 통계 */
+        #log { font-size: 13px; margin: 10px 0; white-space: pre-line; color: #FF3B30; }
+        .stats { font-size: 14px; font-weight: bold; margin: 15px 0; color: #3a3a3c; text-align: center; }
+        
+        /* 리스트 및 체크박스 */
+        .file-list { background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        .file-item { padding: 12px 15px; border-bottom: 1px solid #e5e5ea; display: flex; align-items: flex-start; gap: 10px; font-size: 15px; word-break: break-all; }
+        .file-item:last-child { border-bottom: none; }
+        .file-item input[type="checkbox"] { transform: scale(1.3); margin-top: 3px; }
+        
+        /* 태그 */
+        .tag { font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: bold; margin-bottom: 4px; display: inline-block; }
+        .tag-unformatted { background-color: #FF9500; color: white; }
+        .tag-gdrive { background-color: #E6F4EA; color: #137333; }
+        .tag-local { background-color: #E8F0FE; color: #1967D2; }
+    </style>
+</head>
+<body>
+
+    <h2>📚 웹소설 보관함</h2>
+    
+    <!-- 1. 출처별 업로드 버튼 (버튼을 누르면 숨겨진 input이 실행됨) -->
+    <div style="display: flex; gap: 6px;">
+        <input type="file" id="fileGdrive" multiple accept=".epub, .txt" onchange="processFiles(this, 'gdrive')">
+        <button class="btn-gdrive" onclick="document.getElementById('fileGdrive').click()">☁️ 구글드라이브 추가</button>
+        
+        <input type="file" id="fileLocal" multiple accept=".epub, .txt" onchange="processFiles(this, 'local')">
+        <button class="btn-local" onclick="document.getElementById('fileLocal').click()">📱 아이폰 파일 추가</button>
+    </div>
+
+    <!-- 2. 검색 및 필터 -->
+    <div style="margin-top: 15px;">
+        <input type="text" id="searchInput" placeholder="🔍 저자 또는 제목 검색..." onkeyup="renderList()">
+        
+        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+            <button class="btn-filter" style="background-color: #333;" onclick="setFilter('all')">전체보기</button>
+            <button class="btn-filter" style="background-color: #FF9500;" onclick="setFilter('unformatted')">미정리만</button>
+            <button class="btn-filter" style="background-color: #34A853;" onclick="setFilter('gdrive')">구글드라이브</button>
+            <button class="btn-filter" style="background-color: #007AFF;" onclick="setFilter('local')">아이폰앱</button>
+        </div>
+    </div>
+
+    <!-- 3. 선택 및 정렬 컨트롤 -->
+    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+        <button class="btn-action" onclick="toggleSelectAll()">☑️ 전체 선택/해제</button>
+        <button class="btn-action" onclick="sortList()">🔤 가나다 정렬</button>
+        <button class="btn-action btn-danger" style="width: 100%;" onclick="deleteSelected()">🗑️ 선택한 항목 삭제</button>
+    </div>
+
+    <div class="stats" id="statsArea"></div>
+    <div id="log"></div>
+
+    <!-- 4. 파일 리스트 출력 영역 -->
+    <div class="file-list" id="listContainer"></div>
+
+    <!-- 5. 전체 초기화 (3중 경고) -->
+    <button class="btn-danger" style="margin-top: 20px; padding: 15px;" onclick="clearAllData()">🚨 전체 데이터 초기화</button>
+
+    <script>
+        // 1. 데이터 불러오기 (고유 ID 추가)
+        let savedFiles = JSON.parse(localStorage.getItem('novelMasterList')) || [];
+        let currentFilter = 'all';
+
+        renderList();
+
+        // 2. 파일 처리 함수 (출처 인자 추가)
+        function processFiles(inputElement, source) {
+            const files = inputElement.files;
+            const logDiv = document.getElementById('log');
+            logDiv.innerHTML = ''; 
+
+            let addedCount = 0;
+            let blockedCount = 0;
+
+            for (let i = 0; i < files.length; i++) {
+                const fileName = files[i].name;
+                
+                // 완전 중복 검사 (파일명이 완전 동일하면 차단)
+                if (savedFiles.some(f => f.name === fileName)) {
+                    logDiv.innerHTML += `[차단] ${fileName} (이미 존재함)\n`;
+                    blockedCount++;
+                    continue;
+                }
+
+                let author = "";
+                let titlePart = fileName;
+                let isFormatted = false;
+
+                // 정규식: [저자] 와 제목 사이 띄어쓰기(\s*) 무시
+                const match = fileName.match(/^\[(.*?)\]\s*(.*?)(\.[a-zA-Z0-9]+)$/);
+
+                if (match) {
+                    author = match[1];
+                    titlePart = match[2];
+                    isFormatted = true;
+
+                    // 유사 파일 검사 (같은 저자 + 앞 2어절 일치) -> 통과는 시키되 로그 남김
+                    const words = titlePart.split(' ').filter(w => w.length > 0);
+                    const prefix = words.slice(0, 2).join(' '); 
+                    
+                    if (prefix.length > 2) {
+                        const isSimilar = savedFiles.some(f => f.author === author && f.titlePart && f.titlePart.startsWith(prefix));
+                        if (isSimilar) {
+                            logDiv.innerHTML += `[시리즈 추가됨] ${fileName}\n`;
+                        }
+                    }
+                }
+
+                // 리스트에 저장 (고유 ID로 시간값 사용)
+                savedFiles.push({
+                    id: Date.now() + i, // 선택 삭제를 위한 고유 ID
+                    name: fileName,
+                    author: author,
+                    titlePart: titlePart,
+                    isFormatted: isFormatted,
+                    source: source // 'gdrive' 또는 'local'
+                });
+                addedCount++;
+            }
+
+            localStorage.setItem('novelMasterList', JSON.stringify(savedFiles));
+            alert(`${addedCount}개 추가 완료 (중복 제외: ${blockedCount}개)`);
+            renderList();
+            inputElement.value = ''; // 입력창 초기화
+        }
+
+        // 3. 리스트 렌더링
+        function setFilter(filterType) {
+            currentFilter = filterType;
+            renderList();
+        }
+
+        function renderList() {
+            const listContainer = document.getElementById('listContainer');
+            const searchQuery = document.getElementById('searchInput').value.toLowerCase();
+            listContainer.innerHTML = '';
+
+            // 필터링 적용
+            let filteredFiles = savedFiles.filter(file => {
+                const matchSearch = file.name.toLowerCase().includes(searchQuery) || (file.author && file.author.toLowerCase().includes(searchQuery));
+                
+                if (!matchSearch) return false;
+                if (currentFilter === 'unformatted') return !file.isFormatted;
+                if (currentFilter === 'gdrive') return file.source === 'gdrive';
+                if (currentFilter === 'local') return file.source === 'local';
+                return true; // 'all' 일 경우
+            });
+
+            document.getElementById('statsArea').textContent = `총 파일: ${savedFiles.length}개 / 현재 표시: ${filteredFiles.length}개`;
+
+            filteredFiles.forEach(file => {
+                const div = document.createElement('div');
+                div.className = 'file-item';
+                
+                // 태그 생성
+                let tags = '';
+                if (!file.isFormatted) tags += `<div class="tag tag-unformatted">미정리</div> `;
+                if (file.source === 'gdrive') tags += `<div class="tag tag-gdrive">구글드라이브</div> `;
+                if (file.source === 'local') tags += `<div class="tag tag-local">아이폰파일</div> `;
+
+                // 체크박스와 내용 결합
+                div.innerHTML = `
+                    <input type="checkbox" class="file-checkbox" value="${file.id}">
+                    <div style="width: 100%;">
+                        <div>${tags}</div>
+                        <div style="margin-top: 3px;">${file.name}</div>
+                    </div>
+                `;
+                listContainer.appendChild(div);
+            });
+        }
+
+        // 4. 리스트 조작 기능 (정렬, 전체선택, 선택삭제)
+        function sortList() {
+            savedFiles.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+            localStorage.setItem('novelMasterList', JSON.stringify(savedFiles));
+            renderList();
+        }
+
+        let isAllSelected = false;
+        function toggleSelectAll() {
+            const checkboxes = document.querySelectorAll('.file-checkbox');
+            isAllSelected = !isAllSelected;
+            checkboxes.forEach(cb => cb.checked = isAllSelected);
+        }
+
+        function deleteSelected() {
+            const checkboxes = document.querySelectorAll('.file-checkbox:checked');
+            if (checkboxes.length === 0) {
+                alert("삭제할 항목을 먼저 선택해주세요.");
+                return;
+            }
+            
+            if (confirm(`선택한 ${checkboxes.length}개의 항목을 리스트에서 삭제하시겠습니까?\n(실제 기기/드라이브의 파일은 지워지지 않습니다)`)) {
+                const idsToDelete = Array.from(checkboxes).map(cb => parseInt(cb.value));
+                savedFiles = savedFiles.filter(file => !idsToDelete.includes(file.id));
+                localStorage.setItem('novelMasterList', JSON.stringify(savedFiles));
+                renderList();
+            }
+        }
+
+        // 5. 전체 초기화 (3중 경고 시스템)
+        function clearAllData() {
+            if(confirm("🚨 1차 경고: 정말로 전체 리스트를 초기화 하시겠습니까?")) {
+                if(confirm("🚨 2차 경고: 초기화하면 기존에 분류해둔 정보가 전부 날아갑니다. 정말 지울까요?")) {
+                    if(confirm("🚨 3차 경고 (최종): 되돌릴 수 없습니다! 진짜로 초기화 합니다!")) {
+                        localStorage.removeItem('novelMasterList');
+                        savedFiles = [];
+                        renderList();
+                        document.getElementById('log').innerHTML = '전체 데이터가 초기화 되었습니다.';
+                        alert("초기화 완료");
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>
